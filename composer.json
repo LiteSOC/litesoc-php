@@ -1,0 +1,56 @@
+{
+    "name": "litesoc/litesoc-php",
+    "description": "Official PHP SDK for LiteSOC - Security event tracking and threat detection",
+    "keywords": [
+        "litesoc",
+        "security",
+        "audit",
+        "logging",
+        "threat-detection",
+        "siem",
+        "laravel"
+    ],
+    "homepage": "https://www.litesoc.io",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "LiteSOC",
+            "email": "support@litesoc.io",
+            "homepage": "https://www.litesoc.io"
+        }
+    ],
+    "require": {
+        "php": "^8.0",
+        "guzzlehttp/guzzle": "^7.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0",
+        "phpstan/phpstan": "^1.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "LiteSOC\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "LiteSOC\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse src tests"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "LiteSOC\\Laravel\\LiteSOCServiceProvider"
+            ],
+            "aliases": {
+                "LiteSOC": "LiteSOC\\Laravel\\Facades\\LiteSOC"
+            }
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
