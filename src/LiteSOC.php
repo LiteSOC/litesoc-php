@@ -30,7 +30,7 @@ use GuzzleHttp\Exception\GuzzleException;
  */
 class LiteSOC
 {
-    public const VERSION = '1.0.0';
+    public const VERSION = '1.0.1';
 
     private string $apiKey;
     private string $endpoint;
@@ -108,7 +108,7 @@ class LiteSOC
                     ];
                 } elseif (is_array($options['actor'])) {
                     $actor = [
-                        'id' => $options['actor']['id'] ?? null,
+                        'id' => $options['actor']['id'],
                         'email' => $options['actor']['email'] ?? $options['actor_email'] ?? null,
                     ];
                 }
@@ -198,6 +198,14 @@ class LiteSOC
     public function getQueueSize(): int
     {
         return count($this->queue);
+    }
+
+    /**
+     * Get the flush interval in seconds
+     */
+    public function getFlushInterval(): float
+    {
+        return $this->flushInterval;
     }
 
     /**
