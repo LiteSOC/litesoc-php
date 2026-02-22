@@ -4,6 +4,7 @@ Official PHP SDK for [LiteSOC](https://www.litesoc.io) - Security event tracking
 
 [![Latest Stable Version](https://poser.pugx.org/litesoc/litesoc-php/v)](https://packagist.org/packages/litesoc/litesoc-php)
 [![PHP Version](https://img.shields.io/packagist/php-v/litesoc/litesoc-php)](https://packagist.org/packages/litesoc/litesoc-php)
+[![Tests](https://github.com/LiteSOC/litesoc-php/actions/workflows/test.yml/badge.svg)](https://github.com/LiteSOC/litesoc-php/actions/workflows/test.yml)
 [![License](https://poser.pugx.org/litesoc/litesoc-php/license)](https://packagist.org/packages/litesoc/litesoc-php)
 
 ## Installation
