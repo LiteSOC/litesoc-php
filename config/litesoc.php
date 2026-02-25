@@ -23,7 +23,7 @@ return [
     |
     */
 
-    'endpoint' => env('LITESOC_ENDPOINT', 'https://www.litesoc.io/api/v1/collect'),
+    'endpoint' => env('LITESOC_ENDPOINT', 'https://api.litesoc.io/collect'),
 
     /*
     |--------------------------------------------------------------------------

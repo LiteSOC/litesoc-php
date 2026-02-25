@@ -69,7 +69,7 @@ class LiteSOC
         }
 
         $this->apiKey = $apiKey;
-        $this->endpoint = $options['endpoint'] ?? 'https://www.litesoc.io/api/v1/collect';
+        $this->endpoint = $options['endpoint'] ?? 'https://api.litesoc.io/collect';
         $this->batching = $options['batching'] ?? true;
         $this->batchSize = $options['batch_size'] ?? 10;
         $this->flushInterval = $options['flush_interval'] ?? 5.0;
