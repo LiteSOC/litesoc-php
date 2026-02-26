@@ -402,6 +402,124 @@ For Laravel, set in your `.env`:
 LITESOC_DEBUG=true
 ```
 
+## Non-Blocking / Async Usage
+
+By default, the SDK is synchronous - HTTP requests block until complete. However, the SDK has safeguards:
+
+- **Silent mode** (`silent => true` default): Errors are logged, not thrown
+- **Timeout** (`timeout => 30.0` default): Prevents indefinite blocking
+- **Batching**: Reduces number of HTTP calls
+
+### True Non-Blocking with `fastcgi_finish_request()`
+
+For PHP-FPM environments (Laravel, Symfony, etc.), you can achieve true non-blocking behavior by sending the response to the client before flushing events:
+
+```php
+// In a controller or middleware
+public function login(Request $request)
+{
+    // ... authentication logic ...
+    
+    // Queue the security event (fast, no HTTP call yet)
+    $litesoc->track('auth.login_success', [
+        'actor_id' => auth()->id(),
+        'user_ip' => $request->ip()
+    ]);
+    
+    // Return response to client immediately
+    $response = redirect('/dashboard');
+    
+    // Finish the request - client receives response NOW
+    if (function_exists('fastcgi_finish_request')) {
+        // Send response headers and body to client
+        $response->send();
+        
+        // Close the connection - client is done waiting
+        fastcgi_finish_request();
+        
+        // This runs AFTER the client has received their response
+        $litesoc->flush();
+    }
+    
+    return $response;
+}
+```
+
+### Laravel Middleware for Non-Blocking Flush
+
+Create a middleware that flushes events after the response is sent:
+
+```php
+// app/Http/Middleware/FlushLiteSOCEvents.php
+namespace App\Http\Middleware;
+
+use Closure;
+use LiteSOC\LiteSOC;
+
+class FlushLiteSOCEvents
+{
+    public function __construct(private LiteSOC $litesoc) {}
+
+    public function handle($request, Closure $next)
+    {
+        return $next($request);
+    }
+
+    /**
+     * Flush events after response is sent to client
+     */
+    public function terminate($request, $response)
+    {
+        // In PHP-FPM, this runs after fastcgi_finish_request()
+        // The client has already received their response
+        $this->litesoc->flush();
+    }
+}
+
+// Register in app/Http/Kernel.php
+protected $middleware = [
+    // ... other middleware
+    \App\Http\Middleware\FlushLiteSOCEvents::class,
+];
+```
+
+### Laravel Queued Jobs (Recommended for High-Traffic)
+
+For high-traffic applications, dispatch events to a queue:
+
+```php
+// app/Jobs/TrackSecurityEvent.php
+namespace App\Jobs;
+
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use LiteSOC\LiteSOC;
+
+class TrackSecurityEvent implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable;
+
+    public function __construct(
+        public string $eventType,
+        public array $options
+    ) {}
+
+    public function handle(LiteSOC $litesoc): void
+    {
+        $litesoc->track($this->eventType, $this->options);
+        $litesoc->flush();
+    }
+}
+
+// Usage - non-blocking, runs in background queue worker
+TrackSecurityEvent::dispatch('auth.login_failed', [
+    'actor_id' => 'user_123',
+    'user_ip' => request()->ip()
+]);
+```
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
