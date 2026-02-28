@@ -83,7 +83,7 @@ $litesoc = new LiteSOC('your-api-key', [
     'flush_interval' => 5.0,           // Seconds between auto-flushes (default: 5.0)
     'debug' => false,                  // Enable debug logging (default: false)
     'silent' => true,                  // Fail silently on errors (default: true)
-    'timeout' => 30.0,                 // Request timeout in seconds (default: 30.0)
+    'timeout' => 5.0,                  // Request timeout in seconds (default: 5.0)
 ]);
 ```
 

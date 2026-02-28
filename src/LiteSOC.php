@@ -89,7 +89,7 @@ class LiteSOC
         $this->flushInterval = $options['flush_interval'] ?? 5.0;
         $this->debug = $options['debug'] ?? false;
         $this->silent = $options['silent'] ?? true;
-        $this->timeout = $options['timeout'] ?? 30.0;
+        $this->timeout = $options['timeout'] ?? 5.0;
 
         $this->log('Initialized with base_url: ' . $this->baseUrl);
     }
@@ -432,7 +432,7 @@ class LiteSOC
             $this->client = new Client([
                 'headers' => [
                     'Content-Type' => 'application/json',
-                    'Authorization' => 'Bearer ' . $this->apiKey,
+                    'X-API-Key' => $this->apiKey,
                     'User-Agent' => 'litesoc-php-sdk/' . self::VERSION,
                 ],
             ]);
@@ -457,17 +457,22 @@ class LiteSOC
         $data = $body ? json_decode($body, true) : null;
         $message = $data['error'] ?? $e->getMessage();
 
-        match ($statusCode) {
-            401 => throw new AuthenticationException($message, $body, $e),
-            403 => throw new PlanRestrictedException($message, $data['required_plan'] ?? null, $body, $e),
-            429 => throw new RateLimitException(
-                $message,
-                isset($response) ? (int) $response->getHeaderLine('Retry-After') ?: null : null,
-                $body,
-                $e
-            ),
-            default => throw new LiteSOCException($message, $statusCode, $body, $e),
-        };
+        if ($statusCode === 401) {
+            throw new AuthenticationException($message, $body, $e);
+        }
+
+        if ($statusCode === 403) {
+            $requiredPlan = $data['required_plan'] ?? 'Business or Enterprise';
+            $upgradeHint = " Upgrade to {$requiredPlan} plan to access this feature.";
+            throw new PlanRestrictedException($message . $upgradeHint, $requiredPlan, $body, $e);
+        }
+
+        if ($statusCode === 429) {
+            $retryAfter = isset($response) ? (int) $response->getHeaderLine('Retry-After') ?: null : null;
+            throw new RateLimitException($message, $retryAfter, $body, $e);
+        }
+
+        throw new LiteSOCException($message, $statusCode, $body, $e);
     }
 
     private function handleError(string $context, \Throwable $error): void

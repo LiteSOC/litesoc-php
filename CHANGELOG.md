@@ -32,8 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Defaults to `https://api.litesoc.io`
   - Laravel config updated with `LITESOC_BASE_URL` env variable
 
+- **Upgrade Hints for 403 Errors** - `PlanRestrictedException` now includes upgrade hint in message
+
 ### Changed
 - **Version** - Updated to 2.0.0
+- **Default Timeout** - Reduced from 30 seconds to **5 seconds** for faster failure detection
+- **Authentication Header** - Changed from `Authorization: Bearer` to `X-API-Key` header
 - **User-Agent** - Changed from `litesoc-php/VERSION` to `litesoc-php-sdk/VERSION`
 - **Laravel Integration** - Updated `LiteSOCServiceProvider` to support `base_url`
 - **Test Coverage** - Expanded to 52 tests covering all new functionality
