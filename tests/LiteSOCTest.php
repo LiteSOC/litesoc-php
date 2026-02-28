@@ -7,8 +7,12 @@ namespace LiteSOC\Tests;
 use PHPUnit\Framework\TestCase;
 use LiteSOC\LiteSOC;
 use LiteSOC\Actor;
+use LiteSOC\Alert;
 use LiteSOC\EventType;
 use LiteSOC\EventSeverity;
+use LiteSOC\Forensics;
+use LiteSOC\LocationForensics;
+use LiteSOC\NetworkForensics;
 use LiteSOC\SecurityEvents;
 use LiteSOC\Exceptions\LiteSOCException;
 use LiteSOC\Exceptions\AuthenticationException;
@@ -66,7 +70,7 @@ class LiteSOCTest extends TestCase
 
     public function testVersionIsTwo(): void
     {
-        $this->assertEquals('2.0.0', LiteSOC::VERSION);
+        $this->assertEquals('2.1.0', LiteSOC::VERSION);
     }
 
     public function testDefaultBaseUrl(): void
@@ -566,5 +570,359 @@ class LiteSOCTest extends TestCase
 
         $this->assertNull($sdk->getPlanInfo());
         $this->assertFalse($sdk->hasPlanInfo());
+    }
+
+    // ============================================
+    // NETWORK FORENSICS TESTS
+    // ============================================
+
+    public function testNetworkForensicsFromArrayFull(): void
+    {
+        $data = [
+            'is_vpn' => true,
+            'is_tor' => false,
+            'is_proxy' => true,
+            'is_datacenter' => true,
+            'is_mobile' => false,
+            'asn' => 12345,
+            'asn_org' => 'Example Hosting Inc',
+            'isp' => 'Example ISP',
+        ];
+
+        $network = NetworkForensics::fromArray($data);
+
+        $this->assertTrue($network->isVpn);
+        $this->assertFalse($network->isTor);
+        $this->assertTrue($network->isProxy);
+        $this->assertTrue($network->isDatacenter);
+        $this->assertFalse($network->isMobile);
+        $this->assertEquals(12345, $network->asn);
+        $this->assertEquals('Example Hosting Inc', $network->asnOrg);
+        $this->assertEquals('Example ISP', $network->isp);
+    }
+
+    public function testNetworkForensicsFromArrayPartial(): void
+    {
+        $data = [
+            'is_vpn' => false,
+            'is_tor' => true,
+        ];
+
+        $network = NetworkForensics::fromArray($data);
+
+        $this->assertFalse($network->isVpn);
+        $this->assertTrue($network->isTor);
+        $this->assertFalse($network->isProxy);
+        $this->assertFalse($network->isDatacenter);
+        $this->assertFalse($network->isMobile);
+        $this->assertNull($network->asn);
+        $this->assertNull($network->asnOrg);
+        $this->assertNull($network->isp);
+    }
+
+    public function testNetworkForensicsToArray(): void
+    {
+        $network = new NetworkForensics(
+            isVpn: true,
+            isTor: false,
+            isProxy: false,
+            isDatacenter: true,
+            isMobile: false,
+            asn: 67890,
+            asnOrg: 'Test Org',
+            isp: 'Test ISP',
+        );
+
+        $result = $network->toArray();
+
+        $this->assertTrue($result['is_vpn']);
+        $this->assertFalse($result['is_tor']);
+        $this->assertEquals(67890, $result['asn']);
+        $this->assertEquals('Test Org', $result['asn_org']);
+    }
+
+    // ============================================
+    // LOCATION FORENSICS TESTS
+    // ============================================
+
+    public function testLocationForensicsFromArrayFull(): void
+    {
+        $data = [
+            'city' => 'New York',
+            'region' => 'New York',
+            'country_code' => 'US',
+            'country_name' => 'United States',
+            'latitude' => 40.7128,
+            'longitude' => -74.006,
+            'timezone' => 'America/New_York',
+        ];
+
+        $location = LocationForensics::fromArray($data);
+
+        $this->assertEquals('New York', $location->city);
+        $this->assertEquals('New York', $location->region);
+        $this->assertEquals('US', $location->countryCode);
+        $this->assertEquals('United States', $location->countryName);
+        $this->assertEquals(40.7128, $location->latitude);
+        $this->assertEquals(-74.006, $location->longitude);
+        $this->assertEquals('America/New_York', $location->timezone);
+    }
+
+    public function testLocationForensicsFromArrayPartial(): void
+    {
+        $data = [
+            'country_code' => 'GB',
+        ];
+
+        $location = LocationForensics::fromArray($data);
+
+        $this->assertNull($location->city);
+        $this->assertNull($location->region);
+        $this->assertEquals('GB', $location->countryCode);
+        $this->assertNull($location->countryName);
+        $this->assertNull($location->latitude);
+        $this->assertNull($location->longitude);
+        $this->assertNull($location->timezone);
+    }
+
+    public function testLocationForensicsToArray(): void
+    {
+        $location = new LocationForensics(
+            city: 'London',
+            region: 'England',
+            countryCode: 'GB',
+            countryName: 'United Kingdom',
+            latitude: 51.5074,
+            longitude: -0.1278,
+            timezone: 'Europe/London',
+        );
+
+        $result = $location->toArray();
+
+        $this->assertEquals('London', $result['city']);
+        $this->assertEquals('GB', $result['country_code']);
+        $this->assertEquals(51.5074, $result['latitude']);
+    }
+
+    // ============================================
+    // FORENSICS TESTS
+    // ============================================
+
+    public function testForensicsFromArrayFull(): void
+    {
+        $data = [
+            'network' => [
+                'is_vpn' => true,
+                'is_tor' => false,
+                'is_proxy' => false,
+                'is_datacenter' => true,
+                'is_mobile' => false,
+                'asn' => 12345,
+                'asn_org' => 'Test Org',
+                'isp' => 'Test ISP',
+            ],
+            'location' => [
+                'city' => 'Berlin',
+                'region' => 'Berlin',
+                'country_code' => 'DE',
+                'country_name' => 'Germany',
+                'latitude' => 52.52,
+                'longitude' => 13.405,
+                'timezone' => 'Europe/Berlin',
+            ],
+        ];
+
+        $forensics = Forensics::fromArray($data);
+
+        $this->assertNotNull($forensics);
+        $this->assertTrue($forensics->network->isVpn);
+        $this->assertEquals(12345, $forensics->network->asn);
+        $this->assertEquals('Berlin', $forensics->location->city);
+        $this->assertEquals('DE', $forensics->location->countryCode);
+    }
+
+    public function testForensicsFromArrayNull(): void
+    {
+        $forensics = Forensics::fromArray(null);
+
+        $this->assertNull($forensics);
+    }
+
+    public function testForensicsFromArrayEmpty(): void
+    {
+        $forensics = Forensics::fromArray([]);
+
+        $this->assertNotNull($forensics);
+        $this->assertFalse($forensics->network->isVpn);
+        $this->assertNull($forensics->location->city);
+    }
+
+    public function testForensicsToArray(): void
+    {
+        $forensics = new Forensics(
+            network: new NetworkForensics(
+                isVpn: true,
+                isTor: false,
+                isProxy: false,
+                isDatacenter: false,
+                isMobile: true,
+            ),
+            location: new LocationForensics(
+                city: 'Tokyo',
+                countryCode: 'JP',
+            ),
+        );
+
+        $result = $forensics->toArray();
+
+        $this->assertTrue($result['network']['is_vpn']);
+        $this->assertTrue($result['network']['is_mobile']);
+        $this->assertEquals('Tokyo', $result['location']['city']);
+        $this->assertEquals('JP', $result['location']['country_code']);
+    }
+
+    // ============================================
+    // ALERT TESTS
+    // ============================================
+
+    public function testAlertFromArrayFull(): void
+    {
+        $data = [
+            'id' => 'alert_abc123',
+            'alert_type' => 'brute_force_attack',
+            'severity' => 'high',
+            'status' => 'open',
+            'title' => 'Brute Force Attack Detected',
+            'description' => 'Multiple failed login attempts from single IP',
+            'source_ip' => '192.168.1.100',
+            'actor_id' => 'user_123',
+            'trigger_event_id' => 'evt_xyz789',
+            'forensics' => [
+                'network' => [
+                    'is_vpn' => true,
+                    'is_tor' => false,
+                    'is_proxy' => false,
+                    'is_datacenter' => true,
+                    'is_mobile' => false,
+                    'asn' => 12345,
+                    'asn_org' => 'Example Hosting',
+                    'isp' => 'Example ISP',
+                ],
+                'location' => [
+                    'city' => 'New York',
+                    'region' => 'New York',
+                    'country_code' => 'US',
+                    'country_name' => 'United States',
+                    'latitude' => 40.7128,
+                    'longitude' => -74.006,
+                    'timezone' => 'America/New_York',
+                ],
+            ],
+            'created_at' => '2026-03-01T12:00:00Z',
+            'updated_at' => '2026-03-01T12:30:00Z',
+            'resolved_at' => null,
+            'resolution_notes' => null,
+            'metadata' => ['attempts' => 50],
+        ];
+
+        $alert = Alert::fromArray($data);
+
+        $this->assertEquals('alert_abc123', $alert->id);
+        $this->assertEquals('brute_force_attack', $alert->alertType);
+        $this->assertEquals('high', $alert->severity);
+        $this->assertEquals('open', $alert->status);
+        $this->assertEquals('Brute Force Attack Detected', $alert->title);
+        $this->assertEquals('evt_xyz789', $alert->triggerEventId);
+        $this->assertNotNull($alert->forensics);
+        $this->assertTrue($alert->forensics->network->isVpn);
+        $this->assertEquals(12345, $alert->forensics->network->asn);
+        $this->assertEquals('New York', $alert->forensics->location->city);
+        $this->assertEquals('US', $alert->forensics->location->countryCode);
+        $this->assertEquals(['attempts' => 50], $alert->metadata);
+    }
+
+    public function testAlertFromArrayMinimal(): void
+    {
+        $data = [
+            'id' => 'alert_minimal',
+        ];
+
+        $alert = Alert::fromArray($data);
+
+        $this->assertEquals('alert_minimal', $alert->id);
+        $this->assertEquals('', $alert->alertType);
+        $this->assertEquals('', $alert->severity);
+        $this->assertEquals('', $alert->status);
+        $this->assertEquals('', $alert->title);
+        $this->assertNull($alert->triggerEventId);
+        $this->assertNull($alert->forensics);
+        $this->assertNull($alert->description);
+    }
+
+    public function testAlertFromArrayNullForensicsFreeTier(): void
+    {
+        $data = [
+            'id' => 'alert_free',
+            'alert_type' => 'geo_anomaly',
+            'severity' => 'medium',
+            'status' => 'open',
+            'title' => 'Geographic Anomaly',
+            'trigger_event_id' => 'evt_123',
+            'forensics' => null,
+        ];
+
+        $alert = Alert::fromArray($data);
+
+        $this->assertEquals('alert_free', $alert->id);
+        $this->assertEquals('evt_123', $alert->triggerEventId);
+        $this->assertNull($alert->forensics);
+    }
+
+    public function testAlertToArray(): void
+    {
+        $alert = new Alert(
+            id: 'alert_test',
+            alertType: 'impossible_travel',
+            severity: 'critical',
+            status: 'open',
+            title: 'Impossible Travel Detected',
+            triggerEventId: 'evt_abc',
+            forensics: new Forensics(
+                network: new NetworkForensics(
+                    isVpn: false,
+                    isTor: true,
+                    isProxy: false,
+                    isDatacenter: false,
+                    isMobile: false,
+                ),
+                location: new LocationForensics(city: 'Paris', countryCode: 'FR'),
+            ),
+        );
+
+        $result = $alert->toArray();
+
+        $this->assertEquals('alert_test', $result['id']);
+        $this->assertEquals('evt_abc', $result['trigger_event_id']);
+        $this->assertNotNull($result['forensics']);
+        $this->assertTrue($result['forensics']['network']['is_tor']);
+        $this->assertEquals('Paris', $result['forensics']['location']['city']);
+    }
+
+    public function testAlertToArrayNullForensics(): void
+    {
+        $alert = new Alert(
+            id: 'alert_no_forensics',
+            alertType: 'suspicious_activity',
+            severity: 'low',
+            status: 'resolved',
+            title: 'Suspicious Activity',
+            forensics: null,
+        );
+
+        $result = $alert->toArray();
+
+        $this->assertEquals('alert_no_forensics', $result['id']);
+        $this->assertNull($result['forensics']);
+        $this->assertNull($result['trigger_event_id']);
     }
 }

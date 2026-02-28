@@ -5,6 +5,41 @@ All notable changes to the LiteSOC PHP SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-03-01
+
+### Added
+
+#### Alert Model Class
+- **`Alert`** - New class representing security alerts with typed properties
+  - `triggerEventId` - New property linking alerts to their triggering event
+  - `forensics` - New property containing network intelligence and location data
+  - `fromArray()` - Create Alert from API response array
+  - `toArray()` - Serialize Alert to array
+
+#### Forensics Classes (Pro/Enterprise)
+- **`Forensics`** - Container class for network and location forensics data
+  - `fromArray()` - Create from API response, returns null for Free tier
+  - `toArray()` - Serialize to array
+
+- **`NetworkForensics`** - Network intelligence class including:
+  - `isVpn`, `isTor`, `isProxy`, `isDatacenter`, `isMobile` - Boolean flags
+  - `asn`, `asnOrg`, `isp` - Autonomous System and ISP information
+  - `fromArray()`, `toArray()` - Serialization methods
+
+- **`LocationForensics`** - GeoIP location class including:
+  - `city`, `region`, `countryCode`, `countryName` - Location strings
+  - `latitude`, `longitude` - Coordinates
+  - `timezone` - IANA timezone identifier
+  - `fromArray()`, `toArray()` - Serialization methods
+
+### Changed
+- **Version** - Updated to 2.1.0
+
+### Notes
+- `forensics` returns `null` for Free tier users - ensure null-safe access in your code
+- `triggerEventId` may be `null` for alerts not triggered by a specific event
+- All new classes use PHP 8.2+ readonly properties and constructor promotion
+
 ## [2.0.0] - 2025-06-17
 
 ### Added
