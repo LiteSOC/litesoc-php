@@ -14,6 +14,7 @@ use LiteSOC\Exceptions\LiteSOCException;
 use LiteSOC\Exceptions\AuthenticationException;
 use LiteSOC\Exceptions\RateLimitException;
 use LiteSOC\Exceptions\PlanRestrictedException;
+use LiteSOC\ResponseMetadata;
 
 class LiteSOCTest extends TestCase
 {
@@ -455,8 +456,9 @@ class LiteSOCTest extends TestCase
     {
         $exception = new PlanRestrictedException();
 
-        $this->assertEquals('This feature requires a Business or Enterprise plan', $exception->getMessage());
+        $this->assertEquals('This feature requires a Business or Enterprise plan. Upgrade at: https://www.litesoc.io/pricing', $exception->getMessage());
         $this->assertNull($exception->getRequiredPlan());
+        $this->assertEquals('https://www.litesoc.io/pricing', $exception->getUpgradeUrl());
     }
 
     public function testExceptionInheritance(): void
@@ -480,5 +482,89 @@ class LiteSOCTest extends TestCase
 
         // Queue should remain empty since batching is disabled
         $this->assertEquals(0, $sdk->getQueueSize());
+    }
+
+    // ============================================
+    // RESPONSE METADATA TESTS
+    // ============================================
+
+    public function testResponseMetadataFromHeaders(): void
+    {
+        $headers = [
+            'X-LiteSOC-Plan' => 'business',
+            'X-LiteSOC-Retention' => '90',
+            'X-LiteSOC-Cutoff' => '2024-01-01T00:00:00Z',
+        ];
+
+        $metadata = ResponseMetadata::fromHeaders($headers);
+
+        $this->assertEquals('business', $metadata->plan);
+        $this->assertEquals(90, $metadata->retentionDays);
+        $this->assertEquals('2024-01-01T00:00:00Z', $metadata->cutoffDate);
+        $this->assertTrue($metadata->hasPlanInfo());
+        $this->assertTrue($metadata->hasRetentionInfo());
+    }
+
+    public function testResponseMetadataFromHeadersCaseInsensitive(): void
+    {
+        $headers = [
+            'x-litesoc-plan' => 'enterprise',
+            'x-litesoc-retention' => '365',
+            'x-litesoc-cutoff' => '2023-06-01T00:00:00Z',
+        ];
+
+        $metadata = ResponseMetadata::fromHeaders($headers);
+
+        $this->assertEquals('enterprise', $metadata->plan);
+        $this->assertEquals(365, $metadata->retentionDays);
+        $this->assertEquals('2023-06-01T00:00:00Z', $metadata->cutoffDate);
+    }
+
+    public function testResponseMetadataFromHeadersWithArrayValues(): void
+    {
+        // Guzzle returns headers as arrays
+        $headers = [
+            'X-LiteSOC-Plan' => ['starter'],
+            'X-LiteSOC-Retention' => ['30'],
+            'X-LiteSOC-Cutoff' => ['2024-06-01T00:00:00Z'],
+        ];
+
+        $metadata = ResponseMetadata::fromHeaders($headers);
+
+        $this->assertEquals('starter', $metadata->plan);
+        $this->assertEquals(30, $metadata->retentionDays);
+        $this->assertEquals('2024-06-01T00:00:00Z', $metadata->cutoffDate);
+    }
+
+    public function testResponseMetadataFromEmptyHeaders(): void
+    {
+        $metadata = ResponseMetadata::fromHeaders([]);
+
+        $this->assertNull($metadata->plan);
+        $this->assertNull($metadata->retentionDays);
+        $this->assertNull($metadata->cutoffDate);
+        $this->assertFalse($metadata->hasPlanInfo());
+        $this->assertFalse($metadata->hasRetentionInfo());
+    }
+
+    public function testResponseMetadataToArray(): void
+    {
+        $metadata = new ResponseMetadata('business', 90, '2024-01-01T00:00:00Z');
+
+        $array = $metadata->toArray();
+
+        $this->assertEquals([
+            'plan' => 'business',
+            'retentionDays' => 90,
+            'cutoffDate' => '2024-01-01T00:00:00Z',
+        ], $array);
+    }
+
+    public function testGetPlanInfoReturnsNullInitially(): void
+    {
+        $sdk = new LiteSOC('test-key');
+
+        $this->assertNull($sdk->getPlanInfo());
+        $this->assertFalse($sdk->hasPlanInfo());
     }
 }

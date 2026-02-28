@@ -455,6 +455,78 @@ $result = $litesoc->getEvents(50, [
 $event = $litesoc->getEvent('event_xyz789');
 ```
 
+## Plan Awareness & Quota Headers
+
+The SDK automatically captures plan and quota information from API response headers:
+
+### Response Metadata
+
+After any Management API call, you can access plan information:
+
+```php
+use LiteSOC\LiteSOC;
+
+$litesoc = new LiteSOC('your-api-key');
+
+// Make an API call first
+$alerts = $litesoc->getAlerts();
+
+// Get plan metadata from response headers
+$planInfo = $litesoc->getPlanInfo();
+
+if ($planInfo) {
+    echo "Plan: " . $planInfo->plan;              // e.g., "business", "enterprise"
+    echo "Retention: " . $planInfo->retentionDays . " days";
+    echo "Cutoff: " . $planInfo->cutoffDate;       // ISO 8601 timestamp
+}
+
+// Check if plan info is available
+if ($litesoc->hasPlanInfo()) {
+    // Plan data has been populated
+}
+```
+
+### Headers Parsed
+
+| Header | Property | Description |
+|--------|----------|-------------|
+| `X-LiteSOC-Plan` | `plan` | Current plan name (starter, business, enterprise) |
+| `X-LiteSOC-Retention` | `retentionDays` | Data retention period in days |
+| `X-LiteSOC-Cutoff` | `cutoffDate` | Earliest accessible data timestamp |
+
+### ResponseMetadata Class
+
+```php
+use LiteSOC\ResponseMetadata;
+
+// Access properties directly (readonly)
+$planInfo = $litesoc->getPlanInfo();
+$plan = $planInfo->plan;                 // string|null
+$days = $planInfo->retentionDays;        // int|null
+$cutoff = $planInfo->cutoffDate;         // string|null
+
+// Helper methods
+$planInfo->hasPlanInfo();                // bool
+$planInfo->hasRetentionInfo();           // bool
+$planInfo->toArray();                    // array
+```
+
+### Plan-Restricted Features (403 Handling)
+
+When accessing features that require a higher plan, the SDK throws `PlanRestrictedException`:
+
+```php
+use LiteSOC\Exceptions\PlanRestrictedException;
+
+try {
+    $alerts = $litesoc->getAlerts();
+} catch (PlanRestrictedException $e) {
+    echo "Upgrade required: " . $e->getMessage();
+    echo "Upgrade at: " . $e->getUpgradeUrl();  // https://www.litesoc.io/pricing
+    echo "Required plan: " . $e->getRequiredPlan();
+}
+```
+
 ## Exception Handling
 
 The SDK provides specific exceptions for different error scenarios:

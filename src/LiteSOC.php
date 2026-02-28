@@ -11,6 +11,7 @@ use LiteSOC\Exceptions\LiteSOCException;
 use LiteSOC\Exceptions\AuthenticationException;
 use LiteSOC\Exceptions\RateLimitException;
 use LiteSOC\Exceptions\PlanRestrictedException;
+use LiteSOC\ResponseMetadata;
 
 /**
  * LiteSOC SDK for tracking security events
@@ -56,6 +57,11 @@ class LiteSOC
     private array $queue = [];
 
     private ?Client $client = null;
+
+    /**
+     * Last response metadata (plan info, retention, cutoff)
+     */
+    private ?ResponseMetadata $lastResponseMetadata = null;
 
     /**
      * Initialize the LiteSOC SDK
@@ -107,6 +113,17 @@ class LiteSOC
      *     metadata?: array<string, mixed>,
      *     timestamp?: string|\DateTimeInterface,
      * } $options Event options
+     *
+     * **⚠️ CRITICAL: user_ip is REQUIRED for Behavioral AI features:**
+     * - Impossible Travel detection
+     * - Geo-Anomaly detection
+     * - Forensic Maps visualization
+     * - Network Intelligence (VPN/Tor/Proxy detection)
+     *
+     * Events without user_ip will have `network_intelligence: null` and `geolocation: null`.
+     *
+     * **Note:** The `severity` option is ignored. Severity is automatically assigned
+     * server-side by LiteSOC based on threat intelligence to prevent tampering.
      */
     public function track(string $eventName, array $options = []): void
     {
@@ -151,9 +168,9 @@ class LiteSOC
             $metadata['_sdk'] = 'litesoc-php';
             $metadata['_sdk_version'] = self::VERSION;
 
-            if (isset($options['severity'])) {
-                $metadata['_severity'] = $options['severity'];
-            }
+            // NOTE: Severity is intentionally NOT included in the payload.
+            // Severity is automatically assigned server-side by LiteSOC to prevent tampering.
+            // Any client-specified 'severity' option is ignored.
 
             // Create queued event
             $event = [
@@ -268,21 +285,25 @@ class LiteSOC
     }
 
     /**
-     * Track a privilege escalation event (critical severity)
+     * Track a privilege escalation event
+     *
+     * Note: Severity is automatically assigned server-side by LiteSOC.
      *
      * @param string $actorId User ID
      * @param array{actor_email?: string, user_ip?: string, metadata?: array<string, mixed>} $options
      */
     public function trackPrivilegeEscalation(string $actorId, array $options = []): void
     {
+        // Note: Severity is assigned server-side, not passed from client
         $this->track('admin.privilege_escalation', array_merge([
             'actor_id' => $actorId,
-            'severity' => EventSeverity::CRITICAL,
         ], $options));
     }
 
     /**
-     * Track a sensitive data access event (high severity)
+     * Track a sensitive data access event
+     *
+     * Note: Severity is automatically assigned server-side by LiteSOC.
      *
      * @param string $actorId User ID
      * @param string $resource Resource accessed
@@ -293,28 +314,32 @@ class LiteSOC
         $metadata = $options['metadata'] ?? [];
         $metadata['resource'] = $resource;
 
+        // Note: Severity is assigned server-side, not passed from client
         $this->track('data.sensitive_access', array_merge([
             'actor_id' => $actorId,
-            'severity' => EventSeverity::HIGH,
             'metadata' => $metadata,
         ], $options));
     }
 
     /**
-     * Track a bulk delete event (high severity)
+     * Track a bulk delete event
+     *
+     * Note: Severity is automatically assigned server-side by LiteSOC.
      *
      * @param string $actorId User ID
      * @param int $recordCount Number of records deleted
      * @param array{actor_email?: string, user_ip?: string, metadata?: array<string, mixed>} $options
+     *
+     * NOTE: Severity is auto-assigned server-side for this high-risk event type.
      */
     public function trackBulkDelete(string $actorId, int $recordCount, array $options = []): void
     {
         $metadata = $options['metadata'] ?? [];
         $metadata['records_deleted'] = $recordCount;
 
+        // Severity is assigned server-side for data.bulk_delete events
         $this->track('data.bulk_delete', array_merge([
             'actor_id' => $actorId,
-            'severity' => EventSeverity::HIGH,
             'metadata' => $metadata,
         ], $options));
     }
@@ -492,6 +517,38 @@ class LiteSOC
     }
 
     // ============================================
+    // PLAN INFO METHODS
+    // ============================================
+
+    /**
+     * Get plan information from the last API response
+     *
+     * Returns metadata parsed from response headers including:
+     * - plan: Current plan name (e.g., "starter", "business", "enterprise")
+     * - retentionDays: Data retention period in days
+     * - cutoffDate: Earliest accessible data timestamp (ISO 8601)
+     *
+     * Note: This returns data from the most recent API call.
+     * Call getAlerts() or getEvents() first to populate this data.
+     *
+     * @return ResponseMetadata|null Plan metadata or null if no API calls made yet
+     */
+    public function getPlanInfo(): ?ResponseMetadata
+    {
+        return $this->lastResponseMetadata;
+    }
+
+    /**
+     * Check if plan information is available
+     *
+     * @return bool True if plan info has been populated from an API response
+     */
+    public function hasPlanInfo(): bool
+    {
+        return $this->lastResponseMetadata !== null && $this->lastResponseMetadata->hasPlanInfo();
+    }
+
+    // ============================================
     // MANAGEMENT API METHODS (Business/Enterprise)
     // ============================================
 
@@ -644,6 +701,10 @@ class LiteSOC
             }
 
             $response = $client->request($method, $url, $options);
+
+            // Parse plan/quota headers from response
+            $this->lastResponseMetadata = ResponseMetadata::fromHeaders($response->getHeaders());
+
             $body = $response->getBody()->getContents();
 
             return json_decode($body, true) ?? [];

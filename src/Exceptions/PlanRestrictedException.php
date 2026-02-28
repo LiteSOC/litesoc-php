@@ -9,13 +9,20 @@ namespace LiteSOC\Exceptions;
  *
  * This indicates the requested feature requires a higher subscription tier.
  * The Management API requires a Business or Enterprise plan.
+ *
+ * Upgrade your plan at: https://www.litesoc.io/pricing
  */
 class PlanRestrictedException extends LiteSOCException
 {
+    /**
+     * URL to upgrade plan
+     */
+    public const UPGRADE_URL = 'https://www.litesoc.io/pricing';
+
     private ?string $requiredPlan;
 
     public function __construct(
-        string $message = 'This feature requires a Business or Enterprise plan',
+        string $message = 'This feature requires a Business or Enterprise plan. Upgrade at: https://www.litesoc.io/pricing',
         ?string $requiredPlan = null,
         ?string $responseBody = null,
         ?\Throwable $previous = null
@@ -30,5 +37,13 @@ class PlanRestrictedException extends LiteSOCException
     public function getRequiredPlan(): ?string
     {
         return $this->requiredPlan;
+    }
+
+    /**
+     * Get the URL to upgrade the plan
+     */
+    public function getUpgradeUrl(): string
+    {
+        return self::UPGRADE_URL;
     }
 }
