@@ -15,15 +15,27 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | API Endpoint
+    | Base URL
     |--------------------------------------------------------------------------
     |
-    | The LiteSOC API endpoint. You typically don't need to change this
+    | The LiteSOC API base URL. You typically don't need to change this
     | unless you're using a custom deployment.
     |
     */
 
-    'endpoint' => env('LITESOC_ENDPOINT', 'https://api.litesoc.io/collect'),
+    'base_url' => env('LITESOC_BASE_URL', 'https://api.litesoc.io'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | API Endpoint (Legacy)
+    |--------------------------------------------------------------------------
+    |
+    | Legacy option for backward compatibility. Use 'base_url' instead.
+    | If set, this overrides the collect endpoint specifically.
+    |
+    */
+
+    'endpoint' => env('LITESOC_ENDPOINT'),
 
     /*
     |--------------------------------------------------------------------------

@@ -23,7 +23,8 @@ class LiteSOCServiceProvider extends ServiceProvider
             $config = $app['config']['litesoc'];
 
             return new LiteSOC($config['api_key'], [
-                'endpoint' => $config['endpoint'] ?? 'https://api.litesoc.io/collect',
+                'base_url' => $config['base_url'] ?? LiteSOC::DEFAULT_BASE_URL,
+                'endpoint' => $config['endpoint'] ?? null, // Legacy support
                 'batching' => $config['batching'] ?? true,
                 'batch_size' => $config['batch_size'] ?? 10,
                 'flush_interval' => $config['flush_interval'] ?? 5.0,

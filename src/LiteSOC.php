@@ -6,6 +6,11 @@ namespace LiteSOC;
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
+use GuzzleHttp\Exception\RequestException;
+use LiteSOC\Exceptions\LiteSOCException;
+use LiteSOC\Exceptions\AuthenticationException;
+use LiteSOC\Exceptions\RateLimitException;
+use LiteSOC\Exceptions\PlanRestrictedException;
 
 /**
  * LiteSOC SDK for tracking security events
@@ -26,13 +31,19 @@ use GuzzleHttp\Exception\GuzzleException;
  *
  * // Flush remaining events
  * $litesoc->flush();
+ *
+ * // Management API (Business/Enterprise plans)
+ * $alerts = $litesoc->getAlerts(['severity' => 'critical']);
+ * $events = $litesoc->getEvents(20);
  * ```
  */
 class LiteSOC
 {
-    public const VERSION = '1.0.1';
+    public const VERSION = '2.0.0';
+    public const DEFAULT_BASE_URL = 'https://api.litesoc.io';
 
     private string $apiKey;
+    private string $baseUrl;
     private string $endpoint;
     private bool $batching;
     private int $batchSize;
@@ -51,6 +62,7 @@ class LiteSOC
      *
      * @param string $apiKey Your LiteSOC API key (required)
      * @param array{
+     *     base_url?: string,
      *     endpoint?: string,
      *     batching?: bool,
      *     batch_size?: int,
@@ -69,7 +81,9 @@ class LiteSOC
         }
 
         $this->apiKey = $apiKey;
-        $this->endpoint = $options['endpoint'] ?? 'https://api.litesoc.io/collect';
+        $this->baseUrl = $options['base_url'] ?? self::DEFAULT_BASE_URL;
+        // Support legacy 'endpoint' option for backward compatibility
+        $this->endpoint = $options['endpoint'] ?? $this->baseUrl . '/collect';
         $this->batching = $options['batching'] ?? true;
         $this->batchSize = $options['batch_size'] ?? 10;
         $this->flushInterval = $options['flush_interval'] ?? 5.0;
@@ -77,7 +91,7 @@ class LiteSOC
         $this->silent = $options['silent'] ?? true;
         $this->timeout = $options['timeout'] ?? 30.0;
 
-        $this->log('Initialized with endpoint: ' . $this->endpoint);
+        $this->log('Initialized with base_url: ' . $this->baseUrl);
     }
 
     /**
@@ -419,12 +433,41 @@ class LiteSOC
                 'headers' => [
                     'Content-Type' => 'application/json',
                     'Authorization' => 'Bearer ' . $this->apiKey,
-                    'User-Agent' => 'litesoc-php/' . self::VERSION,
+                    'User-Agent' => 'litesoc-php-sdk/' . self::VERSION,
                 ],
             ]);
         }
 
         return $this->client;
+    }
+
+    /**
+     * Handle HTTP response errors and throw appropriate exceptions
+     *
+     * @throws AuthenticationException If API key is invalid (401)
+     * @throws PlanRestrictedException If feature requires higher plan (403)
+     * @throws RateLimitException If rate limit exceeded (429)
+     * @throws LiteSOCException For other API errors
+     */
+    private function handleHttpError(RequestException $e): void
+    {
+        $response = $e->getResponse();
+        $statusCode = $response?->getStatusCode() ?? 0;
+        $body = $response?->getBody()?->getContents();
+        $data = $body ? json_decode($body, true) : null;
+        $message = $data['error'] ?? $e->getMessage();
+
+        match ($statusCode) {
+            401 => throw new AuthenticationException($message, $body, $e),
+            403 => throw new PlanRestrictedException($message, $data['required_plan'] ?? null, $body, $e),
+            429 => throw new RateLimitException(
+                $message,
+                isset($response) ? (int) $response->getHeaderLine('Retry-After') ?: null : null,
+                $body,
+                $e
+            ),
+            default => throw new LiteSOCException($message, $statusCode, $body, $e),
+        };
     }
 
     private function handleError(string $context, \Throwable $error): void
@@ -440,6 +483,170 @@ class LiteSOC
     {
         if ($this->debug) {
             echo "[LiteSOC] {$message}\n";
+        }
+    }
+
+    // ============================================
+    // MANAGEMENT API METHODS (Business/Enterprise)
+    // ============================================
+
+    /**
+     * Get alerts from the Management API
+     *
+     * Requires Business or Enterprise plan.
+     *
+     * @param array{
+     *     severity?: string,
+     *     status?: string,
+     *     limit?: int,
+     *     offset?: int,
+     * } $filters Optional filters
+     * @return array<string, mixed>
+     * @throws AuthenticationException If API key is invalid
+     * @throws PlanRestrictedException If plan doesn't support Management API
+     * @throws RateLimitException If rate limit exceeded
+     * @throws LiteSOCException For other API errors
+     */
+    public function getAlerts(array $filters = []): array
+    {
+        $this->log('Fetching alerts');
+        return $this->apiRequest('GET', '/alerts', $filters);
+    }
+
+    /**
+     * Get a specific alert by ID
+     *
+     * Requires Business or Enterprise plan.
+     *
+     * @param string $alertId The alert ID
+     * @return array<string, mixed> The alert data
+     * @throws AuthenticationException If API key is invalid
+     * @throws PlanRestrictedException If plan doesn't support Management API
+     * @throws RateLimitException If rate limit exceeded
+     * @throws LiteSOCException For other API errors
+     */
+    public function getAlert(string $alertId): array
+    {
+        $this->log('Fetching alert: ' . $alertId);
+        return $this->apiRequest('GET', '/alerts/' . urlencode($alertId));
+    }
+
+    /**
+     * Resolve an alert
+     *
+     * Requires Business or Enterprise plan.
+     *
+     * @param string $alertId The alert ID to resolve
+     * @param string $resolutionType Resolution type (e.g., 'resolved', 'false_positive')
+     * @param string $notes Optional resolution notes
+     * @return array<string, mixed> The updated alert
+     * @throws AuthenticationException If API key is invalid
+     * @throws PlanRestrictedException If plan doesn't support Management API
+     * @throws RateLimitException If rate limit exceeded
+     * @throws LiteSOCException For other API errors
+     */
+    public function resolveAlert(string $alertId, string $resolutionType, string $notes = ''): array
+    {
+        $this->log('Resolving alert: ' . $alertId);
+        return $this->apiRequest('PATCH', '/alerts/' . urlencode($alertId), [
+            'status' => 'resolved',
+            'resolution_type' => $resolutionType,
+            'notes' => $notes,
+        ]);
+    }
+
+    /**
+     * Mark an alert as safe (false positive)
+     *
+     * Requires Business or Enterprise plan.
+     *
+     * @param string $alertId The alert ID to mark as safe
+     * @param string $notes Optional notes explaining why it's safe
+     * @return array<string, mixed> The updated alert
+     * @throws AuthenticationException If API key is invalid
+     * @throws PlanRestrictedException If plan doesn't support Management API
+     * @throws RateLimitException If rate limit exceeded
+     * @throws LiteSOCException For other API errors
+     */
+    public function markAlertSafe(string $alertId, string $notes = ''): array
+    {
+        $this->log('Marking alert as safe: ' . $alertId);
+        return $this->resolveAlert($alertId, 'false_positive', $notes);
+    }
+
+    /**
+     * Get events from the Management API
+     *
+     * Requires Business or Enterprise plan.
+     *
+     * @param int $limit Maximum number of events to return (default: 20)
+     * @param array{
+     *     event?: string,
+     *     actor_id?: string,
+     *     severity?: string,
+     *     offset?: int,
+     * } $filters Optional filters
+     * @return array<string, mixed>
+     * @throws AuthenticationException If API key is invalid
+     * @throws PlanRestrictedException If plan doesn't support Management API
+     * @throws RateLimitException If rate limit exceeded
+     * @throws LiteSOCException For other API errors
+     */
+    public function getEvents(int $limit = 20, array $filters = []): array
+    {
+        $this->log('Fetching events');
+        return $this->apiRequest('GET', '/events', array_merge(['limit' => $limit], $filters));
+    }
+
+    /**
+     * Get a specific event by ID
+     *
+     * Requires Business or Enterprise plan.
+     *
+     * @param string $eventId The event ID
+     * @return array<string, mixed> The event data
+     * @throws AuthenticationException If API key is invalid
+     * @throws PlanRestrictedException If plan doesn't support Management API
+     * @throws RateLimitException If rate limit exceeded
+     * @throws LiteSOCException For other API errors
+     */
+    public function getEvent(string $eventId): array
+    {
+        $this->log('Fetching event: ' . $eventId);
+        return $this->apiRequest('GET', '/events/' . urlencode($eventId));
+    }
+
+    /**
+     * Make an API request to the Management API
+     *
+     * @param string $method HTTP method
+     * @param string $path API path
+     * @param array<string, mixed> $data Request data (query params for GET, body for POST/PATCH)
+     * @return array<string, mixed>
+     */
+    private function apiRequest(string $method, string $path, array $data = []): array
+    {
+        $client = $this->getClient();
+        $url = $this->baseUrl . $path;
+
+        try {
+            $options = ['timeout' => $this->timeout];
+
+            if ($method === 'GET' && !empty($data)) {
+                $options['query'] = $data;
+            } elseif (!empty($data)) {
+                $options['json'] = $data;
+            }
+
+            $response = $client->request($method, $url, $options);
+            $body = $response->getBody()->getContents();
+
+            return json_decode($body, true) ?? [];
+        } catch (RequestException $e) {
+            $this->handleHttpError($e);
+            // @codeCoverageIgnoreStart
+            throw $e; // Never reached but required for static analysis
+            // @codeCoverageIgnoreEnd
         }
     }
 }

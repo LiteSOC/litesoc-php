@@ -1,4 +1,4 @@
-name: Tests
+name: CI
 
 on:
   push:
@@ -7,8 +7,34 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  lint:
+    name: Static Analysis
     runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: mbstring, json, curl
+          coverage: none
+
+      - name: Validate composer.json
+        run: composer validate --strict
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress
+
+      - name: Run PHPStan static analysis
+        run: composer analyse
+
+  test:
+    name: Test PHP ${{ matrix.php-version }}
+    runs-on: ubuntu-latest
+    needs: lint
     strategy:
       fail-fast: false
       matrix:
@@ -23,23 +49,23 @@ jobs:
         with:
           php-version: ${{ matrix.php-version }}
           extensions: mbstring, json, curl
-          coverage: none
-
-      - name: Validate composer.json
-        run: composer validate --strict
+          coverage: xdebug
 
       - name: Install dependencies
         run: composer install --prefer-dist --no-progress
 
-      - name: Run PHPStan static analysis
-        run: composer analyse
-
       - name: Run PHPUnit tests
         run: composer test
 
-  # Optional: Run tests on Windows and macOS for broader compatibility
+      - name: Run PHPUnit tests with coverage
+        if: matrix.php-version == '8.2'
+        run: ./vendor/bin/phpunit --coverage-text
+
+  # Cross-platform compatibility tests
   test-os:
+    name: Test ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    needs: lint
     strategy:
       fail-fast: false
       matrix:

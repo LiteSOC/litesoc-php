@@ -4,7 +4,8 @@ Official PHP SDK for [LiteSOC](https://www.litesoc.io) - Security event tracking
 
 [![Latest Stable Version](https://poser.pugx.org/litesoc/litesoc-php/v)](https://packagist.org/packages/litesoc/litesoc-php)
 [![PHP Version](https://img.shields.io/packagist/php-v/litesoc/litesoc-php)](https://packagist.org/packages/litesoc/litesoc-php)
-[![Tests](https://github.com/LiteSOC/litesoc-php/actions/workflows/test.yml/badge.svg)](https://github.com/LiteSOC/litesoc-php/actions/workflows/test.yml)
+[![Tests](https://github.com/LiteSOC/litesoc-php/actions/workflows/ci.yml/badge.svg)](https://github.com/LiteSOC/litesoc-php/actions/workflows/ci.yml)
+[![PHPStan](https://img.shields.io/badge/PHPStan-level%20max-brightgreen.svg)](https://phpstan.org/)
 [![License](https://poser.pugx.org/litesoc/litesoc-php/license)](https://packagist.org/packages/litesoc/litesoc-php)
 
 ## Installation
@@ -36,10 +37,12 @@ $litesoc->flush();
 ## Features
 
 - ✅ **26 standard security event types** - Authentication, authorization, admin, data, and security events
+- ✅ **Management API** - Query alerts and events programmatically (Business/Enterprise plans)
+- ✅ **Custom exceptions** - Specific exceptions for auth, rate limits, and plan restrictions
 - ✅ **Automatic batching** - Events are batched for efficient delivery
 - ✅ **Retry logic** - Failed events are automatically retried
 - ✅ **Laravel integration** - Service provider, facade, and config publishing
-- ✅ **PHP 8.0+** - Modern PHP with full type declarations
+- ✅ **PHP 8.2+** - Modern PHP with full type declarations
 - 🗺️ **GeoIP Enrichment** - Automatic location data from IP addresses
 - 🛡️ **Network Intelligence** - VPN, Tor, Proxy & Datacenter detection
 - 📊 **Threat Scoring** - Auto-assigned severity (Low → Critical)
@@ -106,6 +109,26 @@ $litesoc->track(EventType::AUTH_LOGIN_FAILED, [
     'actor_id' => 'user_123',
     'user_ip' => '192.168.1.1'
 ]);
+```
+
+### Using SecurityEvents Class
+
+```php
+use LiteSOC\SecurityEvents;
+
+// Use predefined security event types
+$litesoc->track(SecurityEvents::AUTH_LOGIN_FAILED, [
+    'actor_id' => 'user_123',
+    'user_ip' => '192.168.1.1'
+]);
+
+// Get all 26 standard events
+$allEvents = SecurityEvents::all();
+
+// Validate an event type
+if (SecurityEvents::isValid('auth.login_failed')) {
+    // Valid standard event
+}
 ```
 
 ### With Severity Level
@@ -371,7 +394,107 @@ $litesoc->clearQueue();
 $litesoc->shutdown();
 ```
 
-## Error Handling
+## Management API (Business/Enterprise)
+
+The Management API allows you to query alerts and events programmatically. Requires a Business or Enterprise plan.
+
+### Get Alerts
+
+```php
+use LiteSOC\LiteSOC;
+
+$litesoc = new LiteSOC('your-api-key');
+
+// Get all alerts
+$result = $litesoc->getAlerts();
+// Returns: ['alerts' => [...], 'total' => 42]
+
+// Get alerts with filters
+$result = $litesoc->getAlerts([
+    'severity' => 'critical',
+    'status' => 'open',
+    'limit' => 10,
+    'offset' => 0,
+]);
+```
+
+### Get Single Alert
+
+```php
+$alert = $litesoc->getAlert('alert_abc123');
+```
+
+### Resolve Alert
+
+```php
+// Mark an alert as resolved
+$updated = $litesoc->resolveAlert('alert_abc123', 'resolved', 'Investigated and confirmed legitimate');
+
+// Mark an alert as false positive
+$updated = $litesoc->markAlertSafe('alert_abc123', 'This is expected behavior from automated testing');
+```
+
+### Get Events
+
+```php
+// Get recent events
+$result = $litesoc->getEvents();
+// Returns: ['events' => [...], 'total' => 100]
+
+// Get events with filters
+$result = $litesoc->getEvents(50, [
+    'event' => 'auth.login_failed',
+    'actor_id' => 'user_123',
+    'severity' => 'high',
+]);
+```
+
+### Get Single Event
+
+```php
+$event = $litesoc->getEvent('event_xyz789');
+```
+
+## Exception Handling
+
+The SDK provides specific exceptions for different error scenarios:
+
+```php
+use LiteSOC\LiteSOC;
+use LiteSOC\Exceptions\LiteSOCException;
+use LiteSOC\Exceptions\AuthenticationException;
+use LiteSOC\Exceptions\RateLimitException;
+use LiteSOC\Exceptions\PlanRestrictedException;
+
+$litesoc = new LiteSOC('your-api-key', ['silent' => false]);
+
+try {
+    $alerts = $litesoc->getAlerts();
+} catch (AuthenticationException $e) {
+    // Invalid or missing API key (401)
+    error_log('Auth failed: ' . $e->getMessage());
+} catch (PlanRestrictedException $e) {
+    // Feature requires higher plan (403)
+    error_log('Upgrade required: ' . $e->getRequiredPlan());
+} catch (RateLimitException $e) {
+    // Rate limit exceeded (429)
+    error_log('Rate limited. Retry after: ' . $e->getRetryAfter() . ' seconds');
+} catch (LiteSOCException $e) {
+    // Other API errors
+    error_log('API error: ' . $e->getMessage() . ' (Status: ' . $e->getStatusCode() . ')');
+}
+```
+
+### Exception Hierarchy
+
+```
+LiteSOCException (base)
+├── AuthenticationException (401)
+├── PlanRestrictedException (403)
+└── RateLimitException (429)
+```
+
+## Error Handling (Silent Mode)
 
 By default, the SDK fails silently (`silent => true`). To catch errors:
 
