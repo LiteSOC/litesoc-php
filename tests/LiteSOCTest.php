@@ -70,7 +70,7 @@ class LiteSOCTest extends TestCase
 
     public function testVersionIsTwo(): void
     {
-        $this->assertEquals('2.1.0', LiteSOC::VERSION);
+        $this->assertEquals('2.2.0', LiteSOC::VERSION);
     }
 
     public function testDefaultBaseUrl(): void
