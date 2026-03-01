@@ -40,7 +40,7 @@ use LiteSOC\ResponseMetadata;
  */
 class LiteSOC
 {
-    public const VERSION = '2.1.0';
+    public const VERSION = '2.2.0';
     public const DEFAULT_BASE_URL = 'https://api.litesoc.io';
 
     private string $apiKey;
@@ -467,6 +467,18 @@ class LiteSOC
     }
 
     /**
+     * Set a custom HTTP client (for testing purposes only)
+     *
+     * @internal This method is for testing purposes only
+     * @param Client $client The Guzzle HTTP client to use
+     * @return void
+     */
+    public function setHttpClient(Client $client): void
+    {
+        $this->client = $client;
+    }
+
+    /**
      * Handle HTTP response errors and throw appropriate exceptions
      *
      * @throws AuthenticationException If API key is invalid (401)
@@ -599,7 +611,8 @@ class LiteSOC
      * Requires Business or Enterprise plan.
      *
      * @param string $alertId The alert ID to resolve
-     * @param string $resolutionType Resolution type (e.g., 'resolved', 'false_positive')
+     * @param string $resolutionType Resolution type ('blocked_ip', 'reset_password', 
+     *                               'contacted_user', 'false_positive', 'other')
      * @param string $notes Optional resolution notes
      * @return array<string, mixed> The updated alert
      * @throws AuthenticationException If API key is invalid
@@ -610,11 +623,14 @@ class LiteSOC
     public function resolveAlert(string $alertId, string $resolutionType, string $notes = ''): array
     {
         $this->log('Resolving alert: ' . $alertId);
-        return $this->apiRequest('PATCH', '/alerts/' . urlencode($alertId), [
-            'status' => 'resolved',
+        $body = [
+            'action' => 'resolve',
             'resolution_type' => $resolutionType,
-            'notes' => $notes,
-        ]);
+        ];
+        if ($notes !== '') {
+            $body['internal_notes'] = $notes;
+        }
+        return $this->apiRequest('PATCH', '/alerts/' . urlencode($alertId), $body);
     }
 
     /**
@@ -633,7 +649,13 @@ class LiteSOC
     public function markAlertSafe(string $alertId, string $notes = ''): array
     {
         $this->log('Marking alert as safe: ' . $alertId);
-        return $this->resolveAlert($alertId, 'false_positive', $notes);
+        $body = [
+            'action' => 'mark_safe',
+        ];
+        if ($notes !== '') {
+            $body['internal_notes'] = $notes;
+        }
+        return $this->apiRequest('PATCH', '/alerts/' . urlencode($alertId), $body);
     }
 
     /**
@@ -641,9 +663,9 @@ class LiteSOC
      *
      * Requires Business or Enterprise plan.
      *
-     * @param int $limit Maximum number of events to return (default: 20)
+     * @param int $limit Maximum number of events to return (default: 20, max: 100)
      * @param array{
-     *     event?: string,
+     *     event_name?: string,
      *     actor_id?: string,
      *     severity?: string,
      *     offset?: int,

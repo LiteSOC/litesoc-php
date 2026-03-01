@@ -5,6 +5,23 @@ All notable changes to the LiteSOC PHP SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-03-02
+
+### Changed
+
+#### Management API Enhancements
+- **`resolveAlert()`** - API body now sends `['action' => 'resolve', 'resolution_type' => ..., 'internal_notes' => ...]` to match API spec
+- **`markAlertSafe()`** - API body now sends `['action' => 'mark_safe', 'internal_notes' => ...]` to match API spec
+
+### Added
+- **`setHttpClient()`** - New method to inject custom Guzzle HTTP client (for testing)
+- Added 15 new Management API tests with mocked HTTP responses
+
+### Fixed
+- Aligned SDK methods with API codebase requirements for PATCH /alerts/:id endpoint
+- Fixed docstring parameter name from `event` to `event_name` in `getEvents()`
+- Updated test suite (88 tests, 230 assertions, 95.61% coverage for core class)
+
 ## [2.1.0] - 2026-03-01
 
 ### Added

@@ -925,4 +925,272 @@ class LiteSOCTest extends TestCase
         $this->assertNull($result['forensics']);
         $this->assertNull($result['trigger_event_id']);
     }
+
+    // ============================================
+    // MANAGEMENT API TESTS (with Mocked HTTP Client)
+    // ============================================
+
+    private function createMockedSdk(array $mockResponses): LiteSOC
+    {
+        $mock = new \GuzzleHttp\Handler\MockHandler($mockResponses);
+        $handlerStack = \GuzzleHttp\HandlerStack::create($mock);
+        $mockClient = new \GuzzleHttp\Client(['handler' => $handlerStack]);
+        
+        $sdk = new LiteSOC('test-api-key', ['debug' => false]);
+        $sdk->setHttpClient($mockClient);
+        
+        return $sdk;
+    }
+
+    public function testGetAlertsSuccess(): void
+    {
+        $sdk = $this->createMockedSdk([
+            new \GuzzleHttp\Psr7\Response(200, [
+                'X-Plan' => 'business',
+                'X-Retention-Days' => '90',
+            ], json_encode([
+                'alerts' => [
+                    ['id' => 'alert_1', 'title' => 'Suspicious Login'],
+                    ['id' => 'alert_2', 'title' => 'Impossible Travel'],
+                ],
+                'total' => 2,
+            ])),
+        ]);
+
+        $result = $sdk->getAlerts();
+
+        $this->assertArrayHasKey('alerts', $result);
+        $this->assertCount(2, $result['alerts']);
+        $this->assertEquals('alert_1', $result['alerts'][0]['id']);
+    }
+
+    public function testGetAlertsWithFilters(): void
+    {
+        $sdk = $this->createMockedSdk([
+            new \GuzzleHttp\Psr7\Response(200, [], json_encode([
+                'alerts' => [['id' => 'alert_critical']],
+                'total' => 1,
+            ])),
+        ]);
+
+        $result = $sdk->getAlerts([
+            'severity' => 'critical',
+            'status' => 'active',
+            'limit' => 10,
+            'offset' => 0,
+        ]);
+
+        $this->assertCount(1, $result['alerts']);
+    }
+
+    public function testGetAlertSuccess(): void
+    {
+        $sdk = $this->createMockedSdk([
+            new \GuzzleHttp\Psr7\Response(200, [], json_encode([
+                'id' => 'alert_123',
+                'alert_type' => 'impossible_travel',
+                'severity' => 'critical',
+                'status' => 'active',
+                'title' => 'Impossible Travel Detected',
+            ])),
+        ]);
+
+        $result = $sdk->getAlert('alert_123');
+
+        $this->assertEquals('alert_123', $result['id']);
+        $this->assertEquals('impossible_travel', $result['alert_type']);
+    }
+
+    public function testResolveAlertSuccess(): void
+    {
+        $sdk = $this->createMockedSdk([
+            new \GuzzleHttp\Psr7\Response(200, [], json_encode([
+                'id' => 'alert_123',
+                'status' => 'resolved',
+                'resolved_at' => '2024-01-15T10:30:00Z',
+            ])),
+        ]);
+
+        $result = $sdk->resolveAlert('alert_123', 'blocked_ip', 'IP has been blocked in firewall');
+
+        $this->assertEquals('alert_123', $result['id']);
+        $this->assertEquals('resolved', $result['status']);
+    }
+
+    public function testResolveAlertWithoutNotes(): void
+    {
+        $sdk = $this->createMockedSdk([
+            new \GuzzleHttp\Psr7\Response(200, [], json_encode([
+                'id' => 'alert_456',
+                'status' => 'resolved',
+            ])),
+        ]);
+
+        $result = $sdk->resolveAlert('alert_456', 'false_positive');
+
+        $this->assertEquals('resolved', $result['status']);
+    }
+
+    public function testMarkAlertSafeSuccess(): void
+    {
+        $sdk = $this->createMockedSdk([
+            new \GuzzleHttp\Psr7\Response(200, [], json_encode([
+                'id' => 'alert_789',
+                'status' => 'safe',
+            ])),
+        ]);
+
+        $result = $sdk->markAlertSafe('alert_789', 'User confirmed this was expected');
+
+        $this->assertEquals('alert_789', $result['id']);
+        $this->assertEquals('safe', $result['status']);
+    }
+
+    public function testMarkAlertSafeWithoutNotes(): void
+    {
+        $sdk = $this->createMockedSdk([
+            new \GuzzleHttp\Psr7\Response(200, [], json_encode([
+                'id' => 'alert_abc',
+                'status' => 'safe',
+            ])),
+        ]);
+
+        $result = $sdk->markAlertSafe('alert_abc');
+
+        $this->assertEquals('safe', $result['status']);
+    }
+
+    public function testGetEventsSuccess(): void
+    {
+        $sdk = $this->createMockedSdk([
+            new \GuzzleHttp\Psr7\Response(200, [
+                'X-Plan' => 'enterprise',
+            ], json_encode([
+                'events' => [
+                    ['id' => 'evt_1', 'event_name' => 'auth.login_failed'],
+                    ['id' => 'evt_2', 'event_name' => 'auth.login_success'],
+                ],
+                'total' => 2,
+            ])),
+        ]);
+
+        $result = $sdk->getEvents(20);
+
+        $this->assertArrayHasKey('events', $result);
+        $this->assertCount(2, $result['events']);
+    }
+
+    public function testGetEventsWithFilters(): void
+    {
+        $sdk = $this->createMockedSdk([
+            new \GuzzleHttp\Psr7\Response(200, [], json_encode([
+                'events' => [['id' => 'evt_critical']],
+                'total' => 1,
+            ])),
+        ]);
+
+        $result = $sdk->getEvents(50, [
+            'event_name' => 'auth.login_failed',
+            'actor_id' => 'user_123',
+            'severity' => 'critical',
+            'offset' => 10,
+        ]);
+
+        $this->assertCount(1, $result['events']);
+    }
+
+    public function testGetEventSuccess(): void
+    {
+        $sdk = $this->createMockedSdk([
+            new \GuzzleHttp\Psr7\Response(200, [], json_encode([
+                'id' => 'evt_123',
+                'event_name' => 'auth.login_failed',
+                'actor' => ['id' => 'user_456', 'email' => 'user@example.com'],
+            ])),
+        ]);
+
+        $result = $sdk->getEvent('evt_123');
+
+        $this->assertEquals('evt_123', $result['id']);
+        $this->assertEquals('auth.login_failed', $result['event_name']);
+    }
+
+    public function testAuthenticationExceptionOnInvalidApiKey(): void
+    {
+        $sdk = $this->createMockedSdk([
+            new \GuzzleHttp\Psr7\Response(401, [], json_encode([
+                'error' => 'Invalid API key',
+            ])),
+        ]);
+
+        $this->expectException(AuthenticationException::class);
+        $this->expectExceptionMessage('Invalid API key');
+
+        $sdk->getAlerts();
+    }
+
+    public function testPlanRestrictedExceptionOnFreeplan(): void
+    {
+        $sdk = $this->createMockedSdk([
+            new \GuzzleHttp\Psr7\Response(403, [], json_encode([
+                'error' => 'Management API requires Business plan',
+                'required_plan' => 'Business',
+            ])),
+        ]);
+
+        $this->expectException(PlanRestrictedException::class);
+
+        $sdk->getEvents();
+    }
+
+    public function testRateLimitExceptionOnTooManyRequests(): void
+    {
+        $sdk = $this->createMockedSdk([
+            new \GuzzleHttp\Psr7\Response(429, [
+                'Retry-After' => '60',
+            ], json_encode([
+                'error' => 'Rate limit exceeded',
+            ])),
+        ]);
+
+        $this->expectException(RateLimitException::class);
+        $this->expectExceptionMessage('Rate limit exceeded');
+
+        $sdk->getAlerts();
+    }
+
+    public function testGenericLiteSOCExceptionOnServerError(): void
+    {
+        $sdk = $this->createMockedSdk([
+            new \GuzzleHttp\Psr7\Response(500, [], json_encode([
+                'error' => 'Internal server error',
+            ])),
+        ]);
+
+        $this->expectException(LiteSOCException::class);
+
+        $sdk->getAlerts();
+    }
+
+    public function testPlanInfoFromResponse(): void
+    {
+        $sdk = $this->createMockedSdk([
+            new \GuzzleHttp\Psr7\Response(200, [
+                'X-LiteSOC-Plan' => 'enterprise',
+                'X-LiteSOC-Retention' => '365',
+                'X-LiteSOC-Cutoff' => '2023-01-15T00:00:00Z',
+            ], json_encode([
+                'alerts' => [],
+                'total' => 0,
+            ])),
+        ]);
+
+        $sdk->getAlerts();
+
+        $this->assertTrue($sdk->hasPlanInfo());
+        $planInfo = $sdk->getPlanInfo();
+        $this->assertNotNull($planInfo);
+        $this->assertEquals('enterprise', $planInfo->plan);
+        $this->assertEquals(365, $planInfo->retentionDays);
+    }
 }
