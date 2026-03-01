@@ -570,8 +570,9 @@ class LiteSOC
      * Requires Business or Enterprise plan.
      *
      * @param array{
-     *     severity?: string,
      *     status?: string,
+     *     severity?: string,
+     *     alert_type?: string,
      *     limit?: int,
      *     offset?: int,
      * } $filters Optional filters
