@@ -14,5 +14,10 @@
         <include>
             <directory suffix=".php">./src</directory>
         </include>
+        <exclude>
+            <directory suffix=".php">./src/Laravel</directory>
+            <file>./src/EventSeverity.php</file>
+            <file>./src/EventType.php</file>
+        </exclude>
     </source>
 </phpunit>

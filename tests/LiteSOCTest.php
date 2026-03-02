@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 use LiteSOC\LiteSOC;
 use LiteSOC\Actor;
 use LiteSOC\Alert;
+use LiteSOC\Event;
 use LiteSOC\EventType;
 use LiteSOC\EventSeverity;
 use LiteSOC\Forensics;
@@ -18,6 +19,8 @@ use LiteSOC\Exceptions\LiteSOCException;
 use LiteSOC\Exceptions\AuthenticationException;
 use LiteSOC\Exceptions\RateLimitException;
 use LiteSOC\Exceptions\PlanRestrictedException;
+use LiteSOC\Exceptions\NotFoundException;
+use LiteSOC\Exceptions\ValidationException;
 use LiteSOC\ResponseMetadata;
 
 class LiteSOCTest extends TestCase
@@ -70,7 +73,7 @@ class LiteSOCTest extends TestCase
 
     public function testVersionIsTwo(): void
     {
-        $this->assertEquals('2.3.1', LiteSOC::VERSION);
+        $this->assertEquals('2.4.0', LiteSOC::VERSION);
     }
 
     public function testDefaultBaseUrl(): void
@@ -265,6 +268,49 @@ class LiteSOCTest extends TestCase
         // Should not throw when queue is empty
         $this->sdk->flush();
         $this->assertEquals(0, $this->sdk->getQueueSize());
+    }
+
+    public function testTrackAutoFlushesWhenBatchSizeReached(): void
+    {
+        // Create a mocked SDK with batch_size of 3
+        $mock = new \GuzzleHttp\Handler\MockHandler([
+            new \GuzzleHttp\Psr7\Response(200, [], json_encode(['success' => true])),
+            new \GuzzleHttp\Psr7\Response(200, [], json_encode(['success' => true])),
+            new \GuzzleHttp\Psr7\Response(200, [], json_encode(['success' => true])),
+        ]);
+        $handlerStack = \GuzzleHttp\HandlerStack::create($mock);
+        $mockClient = new \GuzzleHttp\Client(['handler' => $handlerStack]);
+        
+        $sdk = new LiteSOC('test-api-key', [
+            'batching' => true,
+            'batch_size' => 3,
+            'debug' => false,
+        ]);
+        $sdk->setHttpClient($mockClient);
+
+        // Track 3 events - this should trigger auto-flush
+        $sdk->track('auth.login_failed', ['actor_id' => 'user_1']);
+        $sdk->track('auth.login_failed', ['actor_id' => 'user_2']);
+        $sdk->track('auth.login_failed', ['actor_id' => 'user_3']);
+
+        // Queue should be empty after auto-flush
+        $this->assertEquals(0, $sdk->getQueueSize());
+    }
+
+    public function testSendEventsWithEmptyArray(): void
+    {
+        // Create mocked SDK
+        $sdk = $this->createMockedSdk([]);
+
+        // Use reflection to call protected sendEvents method with empty array
+        $reflection = new \ReflectionClass($sdk);
+        $method = $reflection->getMethod('sendEvents');
+
+        // Should return early without making any HTTP requests
+        $method->invoke($sdk, []);
+
+        // If we got here without exception, the empty check worked
+        $this->assertTrue(true);
     }
 
     public function testFlushWithEventsSuccess(): void
@@ -739,6 +785,20 @@ class LiteSOCTest extends TestCase
         $this->assertEquals('enterprise', $metadata->plan);
         $this->assertEquals(365, $metadata->retentionDays);
         $this->assertEquals('2023-06-01T00:00:00Z', $metadata->cutoffDate);
+    }
+
+    public function testResponseMetadataFromHeadersWithDaysSuffix(): void
+    {
+        $headers = [
+            'X-LiteSOC-Plan' => 'pro',
+            'X-LiteSOC-Retention' => '30 days',
+            'X-LiteSOC-Cutoff' => '2024-02-01T00:00:00Z',
+        ];
+
+        $metadata = ResponseMetadata::fromHeaders($headers);
+
+        $this->assertEquals('pro', $metadata->plan);
+        $this->assertEquals(30, $metadata->retentionDays);
     }
 
     public function testResponseMetadataFromHeadersWithArrayValues(): void
@@ -1415,6 +1475,34 @@ class LiteSOCTest extends TestCase
         $sdk->getAlerts();
     }
 
+    public function testNotFoundExceptionOnGetAlert(): void
+    {
+        $sdk = $this->createMockedSdk([
+            new \GuzzleHttp\Psr7\Response(404, [], json_encode([
+                'error' => 'Alert not found',
+            ])),
+        ]);
+
+        $this->expectException(NotFoundException::class);
+        $this->expectExceptionMessage('Alert not found');
+
+        $sdk->getAlert('nonexistent-id');
+    }
+
+    public function testValidationExceptionOnBadRequest(): void
+    {
+        $sdk = $this->createMockedSdk([
+            new \GuzzleHttp\Psr7\Response(400, [], json_encode([
+                'error' => 'Invalid event_name parameter',
+            ])),
+        ]);
+
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('Invalid event_name parameter');
+
+        $sdk->getEvents();
+    }
+
     public function testPlanInfoFromResponse(): void
     {
         $sdk = $this->createMockedSdk([
@@ -1435,5 +1523,222 @@ class LiteSOCTest extends TestCase
         $this->assertNotNull($planInfo);
         $this->assertEquals('enterprise', $planInfo->plan);
         $this->assertEquals(365, $planInfo->retentionDays);
+    }
+
+    // =========================================
+    // Event Class Tests
+    // =========================================
+
+    public function testEventFromArrayFull(): void
+    {
+        $data = [
+            'id' => 'evt_12345',
+            'org_id' => 'org_67890',
+            'event_name' => 'auth.login_failed',
+            'actor_id' => 'user_123',
+            'user_ip' => '192.168.1.100',
+            'server_ip' => '10.0.0.1',
+            'country_code' => 'US',
+            'city' => 'San Francisco',
+            'is_vpn' => true,
+            'is_tor' => false,
+            'is_proxy' => false,
+            'is_datacenter' => true,
+            'latitude' => 37.7749,
+            'longitude' => -122.4194,
+            'severity' => 'critical',
+            'metadata' => ['reason' => 'invalid_password'],
+            'created_at' => '2026-03-02T10:00:00Z',
+        ];
+
+        $event = Event::fromArray($data);
+
+        $this->assertEquals('evt_12345', $event->id);
+        $this->assertEquals('org_67890', $event->orgId);
+        $this->assertEquals('auth.login_failed', $event->eventName);
+        $this->assertEquals('user_123', $event->actorId);
+        $this->assertEquals('192.168.1.100', $event->userIp);
+        $this->assertEquals('10.0.0.1', $event->serverIp);
+        $this->assertEquals('US', $event->countryCode);
+        $this->assertEquals('San Francisco', $event->city);
+        $this->assertTrue($event->isVpn);
+        $this->assertFalse($event->isTor);
+        $this->assertFalse($event->isProxy);
+        $this->assertTrue($event->isDatacenter);
+        $this->assertEquals(37.7749, $event->latitude);
+        $this->assertEquals(-122.4194, $event->longitude);
+        $this->assertEquals('critical', $event->severity);
+        $this->assertEquals(['reason' => 'invalid_password'], $event->metadata);
+        $this->assertEquals('2026-03-02T10:00:00Z', $event->createdAt);
+    }
+
+    public function testEventFromArrayMinimal(): void
+    {
+        $data = [
+            'id' => 'evt_minimal',
+            'org_id' => 'org_test',
+            'event_name' => 'auth.login',
+        ];
+
+        $event = Event::fromArray($data);
+
+        $this->assertEquals('evt_minimal', $event->id);
+        $this->assertEquals('org_test', $event->orgId);
+        $this->assertEquals('auth.login', $event->eventName);
+        $this->assertNull($event->actorId);
+        $this->assertNull($event->userIp);
+        $this->assertNull($event->isVpn);
+        $this->assertEquals('info', $event->severity);
+    }
+
+    public function testEventToArray(): void
+    {
+        $event = Event::fromArray([
+            'id' => 'evt_123',
+            'org_id' => 'org_456',
+            'event_name' => 'auth.logout',
+            'actor_id' => 'user_789',
+            'severity' => 'warning',
+        ]);
+
+        $array = $event->toArray();
+
+        $this->assertEquals('evt_123', $array['id']);
+        $this->assertEquals('org_456', $array['org_id']);
+        $this->assertEquals('auth.logout', $array['event_name']);
+        $this->assertEquals('user_789', $array['actor_id']);
+        $this->assertEquals('warning', $array['severity']);
+    }
+
+    public function testEventHasForensicsTrue(): void
+    {
+        $event = Event::fromArray([
+            'id' => 'evt_123',
+            'org_id' => 'org_456',
+            'event_name' => 'auth.login',
+            'is_vpn' => true,
+        ]);
+
+        $this->assertTrue($event->hasForensics());
+    }
+
+    public function testEventHasForensicsWithLatitude(): void
+    {
+        $event = Event::fromArray([
+            'id' => 'evt_123',
+            'org_id' => 'org_456',
+            'event_name' => 'auth.login',
+            'latitude' => 37.7749,
+        ]);
+
+        $this->assertTrue($event->hasForensics());
+    }
+
+    public function testEventHasForensicsWithTor(): void
+    {
+        $event = Event::fromArray([
+            'id' => 'evt_123',
+            'org_id' => 'org_456',
+            'event_name' => 'auth.login',
+            'is_tor' => false,
+        ]);
+
+        $this->assertTrue($event->hasForensics());
+    }
+
+    public function testEventHasForensicsWithProxy(): void
+    {
+        $event = Event::fromArray([
+            'id' => 'evt_123',
+            'org_id' => 'org_456',
+            'event_name' => 'auth.login',
+            'is_proxy' => true,
+        ]);
+
+        $this->assertTrue($event->hasForensics());
+    }
+
+    public function testEventHasForensicsFalse(): void
+    {
+        $event = Event::fromArray([
+            'id' => 'evt_123',
+            'org_id' => 'org_456',
+            'event_name' => 'auth.login',
+        ]);
+
+        $this->assertFalse($event->hasForensics());
+    }
+
+    // =========================================
+    // NotFoundException Tests
+    // =========================================
+
+    public function testNotFoundException(): void
+    {
+        $exception = new NotFoundException();
+
+        $this->assertEquals('Resource not found', $exception->getMessage());
+        $this->assertEquals(404, $exception->getCode());
+    }
+
+    public function testNotFoundExceptionCustomMessage(): void
+    {
+        $exception = new NotFoundException('Alert not found', '{"error": "not_found"}');
+
+        $this->assertEquals('Alert not found', $exception->getMessage());
+        $this->assertEquals(404, $exception->getCode());
+        $this->assertEquals('{"error": "not_found"}', $exception->getResponseBody());
+    }
+
+    // =========================================
+    // ValidationException Tests
+    // =========================================
+
+    public function testValidationException(): void
+    {
+        $exception = new ValidationException();
+
+        $this->assertEquals('Invalid request', $exception->getMessage());
+        $this->assertEquals(400, $exception->getCode());
+    }
+
+    public function testValidationExceptionCustomMessage(): void
+    {
+        $exception = new ValidationException('Invalid event type', '{"error": "validation_failed"}');
+
+        $this->assertEquals('Invalid event type', $exception->getMessage());
+        $this->assertEquals(400, $exception->getCode());
+        $this->assertEquals('{"error": "validation_failed"}', $exception->getResponseBody());
+    }
+
+    // =========================================
+    // ResponseMetadata getCutoffDate Tests
+    // =========================================
+
+    public function testResponseMetadataGetCutoffDate(): void
+    {
+        $metadata = ResponseMetadata::fromHeaders([
+            'X-LiteSOC-Plan' => 'pro',
+            'X-LiteSOC-Retention' => '90',
+            'X-LiteSOC-Cutoff' => '2025-12-01T00:00:00Z',
+        ]);
+
+        $this->assertEquals('2025-12-01T00:00:00Z', $metadata->cutoffDate);
+    }
+
+    public function testResponseMetadataHasRetentionInfo(): void
+    {
+        $metadata = ResponseMetadata::fromHeaders([
+            'X-LiteSOC-Retention' => '30',
+        ]);
+
+        $this->assertTrue($metadata->hasRetentionInfo());
+    }
+
+    public function testResponseMetadataHasRetentionInfoFalse(): void
+    {
+        $metadata = ResponseMetadata::fromHeaders([]);
+
+        $this->assertFalse($metadata->hasRetentionInfo());
     }
 }

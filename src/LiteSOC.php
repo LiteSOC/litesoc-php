@@ -42,7 +42,7 @@ use LiteSOC\ResponseMetadata;
  */
 class LiteSOC
 {
-    public const VERSION = '2.3.1';
+    public const VERSION = '2.4.0';
     public const DEFAULT_BASE_URL = 'https://api.litesoc.io';
 
     private string $apiKey;

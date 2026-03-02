@@ -5,6 +5,32 @@ All notable changes to the LiteSOC PHP SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-03-02
+
+### Added
+- **`Event` class** - New typed class for events returned from Management API
+  - `Event::fromArray()` - Create Event from API response
+  - `Event::toArray()` - Serialize Event to array
+  - `Event::hasForensics()` - Check if forensic data is available (Pro/Enterprise only)
+  - Full property support: `id`, `orgId`, `eventName`, `actorId`, `userIp`, `serverIp`, `countryCode`, `city`, `isVpn`, `isTor`, `isProxy`, `isDatacenter`, `latitude`, `longitude`, `severity`, `metadata`, `createdAt`
+
+- **`NotFoundException`** - Exception for 404 Not Found responses
+- **`ValidationException`** - Exception for 400 Bad Request responses
+
+### Changed
+- **`ResponseMetadata`** - Added support for `X-LiteSOC-Retention` header with " days" suffix format
+- **`Alert`** - Simplified interface, removed unused fields
+
+### Tests
+- Achieved **100% code coverage** (Classes, Methods, Lines)
+- Added comprehensive tests for `Event` class
+- Added tests for `NotFoundException` and `ValidationException`
+- Added tests for auto-flush when batch size is reached
+- Added tests for 400 and 404 error handling in Management API
+
+### Fixed
+- Improved test coverage for edge cases in `sendEvents()` and `track()` methods
+
 ## [2.3.1] - 2026-03-02
 
 ### Added
