@@ -5,6 +5,39 @@ All notable changes to the LiteSOC PHP SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-03-02
+
+### Fixed
+
+#### API Compliance - `/api/v1/collect`
+- **Critical**: Fixed `sendEvents()` batch mode - API only accepts single events per request
+  - Previously sent `{"events": [...]}` which the API does not support
+  - Now correctly sends each event individually in a loop
+- **Critical**: Fixed response handling - API returns `{"status": "queued"}` or `{"status": "inserted"}`
+  - Previously checked for `$result['success']` which never existed
+  - Now correctly checks `$result['status']` for 'queued' or 'inserted'
+- **Minor**: Removed `timestamp` from event payload - server generates this field
+  - The API ignores client-provided timestamps for security reasons
+- Improved error handling with per-event retry logic instead of batch retry
+
+#### API Compliance - `/api/v1/events`
+- Updated test mocks to match actual API response format
+  - Response uses `data` key (not `events`) for event arrays
+  - Added `pagination` object with `total`, `limit`, `offset`, `has_more`
+  - Added `meta` object with `plan`, `retention_days`, `redacted`
+- Fixed documentation for filter parameters (`event_name` not `event`)
+- Fixed severity values documentation (`critical`/`warning`/`info` not `high`)
+
+### Added
+- 8 new tests for event sending flow with mocked HTTP responses
+- Tests for debug logging output
+- Tests for silent mode error handling
+- Tests for retry exhaustion after 3 attempts
+
+### Improved
+- Test coverage increased to 96 tests, 248 assertions
+- Core `LiteSOC` class line coverage: 99.04%
+
 ## [2.2.0] - 2026-03-02
 
 ### Changed

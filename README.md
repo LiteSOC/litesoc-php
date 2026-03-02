@@ -398,6 +398,8 @@ $litesoc->shutdown();
 
 The Management API allows you to query alerts and events programmatically. Requires a Business or Enterprise plan.
 
+> **API Endpoints**: These methods interact with `/api/v1/alerts` and `/api/v1/events`
+
 ### Get Alerts
 
 ```php
@@ -407,52 +409,125 @@ $litesoc = new LiteSOC('your-api-key');
 
 // Get all alerts
 $result = $litesoc->getAlerts();
-// Returns: ['alerts' => [...], 'total' => 42]
+// Returns:
+// [
+//     'success' => true,
+//     'data' => [
+//         ['id' => 'alert_123', 'alert_type' => 'impossible_travel', 'severity' => 'critical', ...],
+//         ['id' => 'alert_456', 'alert_type' => 'brute_force', 'severity' => 'warning', ...],
+//     ],
+//     'pagination' => ['total' => 42, 'limit' => 20, 'offset' => 0, 'has_more' => true],
+//     'meta' => ['plan' => 'business', 'retention_days' => 90]
+// ]
 
 // Get alerts with filters
 $result = $litesoc->getAlerts([
-    'severity' => 'critical',
-    'status' => 'open',
+    'severity' => 'critical',         // 'critical', 'warning', 'info'
+    'status' => 'active',             // 'active', 'resolved', 'safe'
+    'alert_type' => 'impossible_travel',
     'limit' => 10,
     'offset' => 0,
 ]);
+
+// Access alerts from the response
+foreach ($result['data'] as $alert) {
+    echo $alert['id'] . ': ' . $alert['title'];
+}
 ```
 
 ### Get Single Alert
 
 ```php
-$alert = $litesoc->getAlert('alert_abc123');
+$result = $litesoc->getAlert('alert_abc123');
+// Returns:
+// [
+//     'success' => true,
+//     'data' => [
+//         'id' => 'alert_abc123',
+//         'alert_type' => 'impossible_travel',
+//         'severity' => 'critical',
+//         'status' => 'active',
+//         'title' => 'Impossible Travel Detected',
+//         'description' => 'Login from New York, then Tokyo within 30 minutes',
+//         'actor_id' => 'user_123',
+//         'trigger_event_id' => 'evt_xyz789',
+//         'created_at' => '2026-03-02T10:30:00Z',
+//         'forensics' => [...],  // Network intelligence & geolocation (Pro/Enterprise)
+//     ],
+//     'meta' => ['plan' => 'business', 'retention_days' => 90]
+// ]
+
+$alert = $result['data'];
+echo $alert['title'] . ' - ' . $alert['severity'];
 ```
 
 ### Resolve Alert
 
 ```php
-// Mark an alert as resolved
-$updated = $litesoc->resolveAlert('alert_abc123', 'resolved', 'Investigated and confirmed legitimate');
+// Mark an alert as resolved with resolution type and notes
+$result = $litesoc->resolveAlert(
+    'alert_abc123',
+    'blocked_ip',                    // Resolution type: 'blocked_ip', 'false_positive', 'investigated', etc.
+    'Blocked IP in firewall'         // Internal notes (optional)
+);
+// Returns:
+// [
+//     'success' => true,
+//     'data' => ['id' => 'alert_abc123', 'status' => 'resolved', 'resolved_at' => '...'],
+// ]
 
-// Mark an alert as false positive
-$updated = $litesoc->markAlertSafe('alert_abc123', 'This is expected behavior from automated testing');
+// Mark an alert as safe (false positive)
+$result = $litesoc->markAlertSafe(
+    'alert_abc123',
+    'Expected behavior from automated testing'  // Internal notes (optional)
+);
+// Returns:
+// [
+//     'success' => true,
+//     'data' => ['id' => 'alert_abc123', 'status' => 'safe'],
+// ]
 ```
 
 ### Get Events
 
 ```php
-// Get recent events
+// Get recent events (default limit: 20)
 $result = $litesoc->getEvents();
-// Returns: ['events' => [...], 'total' => 100]
+// Returns:
+// [
+//     'success' => true,
+//     'data' => [...events],
+//     'pagination' => ['total' => 100, 'limit' => 20, 'offset' => 0, 'has_more' => true],
+//     'meta' => ['plan' => 'business', 'retention_days' => 90, 'redacted' => false]
+// ]
 
 // Get events with filters
 $result = $litesoc->getEvents(50, [
-    'event' => 'auth.login_failed',
-    'actor_id' => 'user_123',
-    'severity' => 'high',
+    'event_name' => 'auth.login_failed',  // Filter by event type
+    'actor_id' => 'user_123',             // Filter by actor
+    'severity' => 'critical',             // 'critical', 'warning', or 'info'
+    'offset' => 10,                       // Pagination offset
 ]);
+
+// Access events from the response
+foreach ($result['data'] as $event) {
+    echo $event['event_name'] . ': ' . $event['actor']['id'];
+}
 ```
 
 ### Get Single Event
 
 ```php
-$event = $litesoc->getEvent('event_xyz789');
+$result = $litesoc->getEvent('event_xyz789');
+// Returns:
+// [
+//     'success' => true,
+//     'data' => [...event data],
+//     'meta' => ['plan' => 'business', 'retention_days' => 90, 'redacted' => false]
+// ]
+
+$event = $result['data'];
+echo $event['event_name'];
 ```
 
 ## Plan Awareness & Quota Headers
@@ -714,6 +789,59 @@ TrackSecurityEvent::dispatch('auth.login_failed', [
     'user_ip' => request()->ip()
 ]);
 ```
+
+## API Reference
+
+### Event Collection API (`/api/v1/collect`)
+
+| Method | Description |
+|--------|-------------|
+| `track($eventName, $options)` | Queue a security event for sending |
+| `trackLoginFailed($actorId, $options)` | Track failed login attempt |
+| `trackLoginSuccess($actorId, $options)` | Track successful login |
+| `trackPrivilegeEscalation($actorId, $options)` | Track privilege escalation (critical) |
+| `trackSensitiveAccess($actorId, $resource, $options)` | Track sensitive data access |
+| `trackBulkDelete($actorId, $recordCount, $options)` | Track bulk deletion operation |
+| `trackRoleChanged($actorId, $oldRole, $newRole, $options)` | Track role/permission changes |
+| `trackAccessDenied($actorId, $resource, $options)` | Track access denied events |
+| `flush()` | Send all queued events immediately |
+| `shutdown()` | Graceful shutdown with flush |
+
+### Events API (`/api/v1/events`)
+
+| Method | Description |
+|--------|-------------|
+| `getEvents($limit, $filters)` | List events with pagination |
+| `getEvent($eventId)` | Get single event by ID |
+
+**Filters for `getEvents()`:**
+- `event_name` - Filter by event type (e.g., `auth.login_failed`)
+- `actor_id` - Filter by actor ID
+- `severity` - Filter by severity: `critical`, `warning`, `info`
+- `offset` - Pagination offset (default: 0)
+
+### Alerts API (`/api/v1/alerts`)
+
+| Method | Description |
+|--------|-------------|
+| `getAlerts($filters)` | List alerts with pagination |
+| `getAlert($alertId)` | Get single alert by ID |
+| `resolveAlert($alertId, $resolutionType, $notes)` | Mark alert as resolved |
+| `markAlertSafe($alertId, $notes)` | Mark alert as safe/false positive |
+
+**Filters for `getAlerts()`:**
+- `severity` - Filter by severity: `critical`, `warning`, `info`
+- `status` - Filter by status: `active`, `resolved`, `safe`
+- `alert_type` - Filter by type: `impossible_travel`, `brute_force`, etc.
+- `limit` - Results per page (default: 20, max: 100)
+- `offset` - Pagination offset (default: 0)
+
+**Resolution Types for `resolveAlert()`:**
+- `blocked_ip` - IP address was blocked
+- `blocked_user` - User account was blocked
+- `false_positive` - Alert was a false positive
+- `investigated` - Investigated, no action needed
+- `other` - Other resolution
 
 ## License
 

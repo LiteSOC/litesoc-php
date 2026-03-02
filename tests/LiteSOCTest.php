@@ -70,7 +70,7 @@ class LiteSOCTest extends TestCase
 
     public function testVersionIsTwo(): void
     {
-        $this->assertEquals('2.2.0', LiteSOC::VERSION);
+        $this->assertEquals('2.3.0', LiteSOC::VERSION);
     }
 
     public function testDefaultBaseUrl(): void
@@ -265,6 +265,170 @@ class LiteSOCTest extends TestCase
         // Should not throw when queue is empty
         $this->sdk->flush();
         $this->assertEquals(0, $this->sdk->getQueueSize());
+    }
+
+    public function testFlushWithEventsSuccess(): void
+    {
+        // Create SDK with batching disabled so we can test immediate send
+        $sdk = new LiteSOC('test-key', ['batching' => false, 'debug' => false, 'silent' => true]);
+
+        // Mock successful response
+        $mock = new \GuzzleHttp\Handler\MockHandler([
+            new \GuzzleHttp\Psr7\Response(202, [], json_encode(['status' => 'queued'])),
+        ]);
+        $handlerStack = \GuzzleHttp\HandlerStack::create($mock);
+        $mockClient = new \GuzzleHttp\Client(['handler' => $handlerStack]);
+        $sdk->setHttpClient($mockClient);
+
+        // Track event - since batching is disabled, it should send immediately
+        // but silent mode prevents exceptions
+        $sdk->track('auth.login_failed', ['actor_id' => 'user_123', 'user_ip' => '192.168.1.1']);
+
+        $this->assertEquals(0, $sdk->getQueueSize());
+    }
+
+    public function testFlushWithBatchingSuccess(): void
+    {
+        // Create SDK with batching enabled
+        $sdk = new LiteSOC('test-key', ['batching' => true, 'debug' => false]);
+
+        // Mock successful responses for 2 events (sent one-by-one per API spec)
+        $mock = new \GuzzleHttp\Handler\MockHandler([
+            new \GuzzleHttp\Psr7\Response(202, [], json_encode(['status' => 'queued'])),
+            new \GuzzleHttp\Psr7\Response(201, [], json_encode(['status' => 'inserted'])),
+        ]);
+        $handlerStack = \GuzzleHttp\HandlerStack::create($mock);
+        $mockClient = new \GuzzleHttp\Client(['handler' => $handlerStack]);
+        $sdk->setHttpClient($mockClient);
+
+        // Track 2 events (queued)
+        $sdk->track('auth.login_failed', ['actor_id' => 'user_123', 'user_ip' => '192.168.1.1']);
+        $sdk->track('auth.login_success', ['actor_id' => 'user_456', 'user_ip' => '10.0.0.1']);
+        $this->assertEquals(2, $sdk->getQueueSize());
+
+        // Flush should send all events
+        $sdk->flush();
+        $this->assertEquals(0, $sdk->getQueueSize());
+    }
+
+    public function testFlushWithPartialFailureRequeues(): void
+    {
+        // Create SDK with batching enabled
+        $sdk = new LiteSOC('test-key', ['batching' => true, 'debug' => false]);
+
+        // First event succeeds, second fails with network error
+        $mock = new \GuzzleHttp\Handler\MockHandler([
+            new \GuzzleHttp\Psr7\Response(202, [], json_encode(['status' => 'queued'])),
+            new \GuzzleHttp\Exception\ConnectException(
+                'Connection refused',
+                new \GuzzleHttp\Psr7\Request('POST', '/collect')
+            ),
+        ]);
+        $handlerStack = \GuzzleHttp\HandlerStack::create($mock);
+        $mockClient = new \GuzzleHttp\Client(['handler' => $handlerStack]);
+        $sdk->setHttpClient($mockClient);
+
+        // Track 2 events
+        $sdk->track('auth.login_failed', ['actor_id' => 'user_123', 'user_ip' => '192.168.1.1']);
+        $sdk->track('auth.login_success', ['actor_id' => 'user_456', 'user_ip' => '10.0.0.1']);
+        $this->assertEquals(2, $sdk->getQueueSize());
+
+        // Flush - first succeeds, second fails and gets requeued
+        $sdk->flush();
+        
+        // Failed event should be requeued with retry_count incremented
+        $this->assertEquals(1, $sdk->getQueueSize());
+    }
+
+    public function testFlushWithAllEventsFailedThrows(): void
+    {
+        // Create SDK with batching enabled, NOT silent
+        $sdk = new LiteSOC('test-key', ['batching' => true, 'debug' => false, 'silent' => false]);
+
+        // All events fail
+        $mock = new \GuzzleHttp\Handler\MockHandler([
+            new \GuzzleHttp\Exception\ConnectException(
+                'Connection refused',
+                new \GuzzleHttp\Psr7\Request('POST', '/collect')
+            ),
+        ]);
+        $handlerStack = \GuzzleHttp\HandlerStack::create($mock);
+        $mockClient = new \GuzzleHttp\Client(['handler' => $handlerStack]);
+        $sdk->setHttpClient($mockClient);
+
+        // Track 1 event
+        $sdk->track('auth.login_failed', ['actor_id' => 'user_123', 'user_ip' => '192.168.1.1']);
+
+        // Flush should throw because all events failed
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('All 1 events failed to send');
+        $sdk->flush();
+    }
+
+    public function testFlushWithApiErrorResponse(): void
+    {
+        // Create SDK with batching enabled, NOT silent
+        $sdk = new LiteSOC('test-key', ['batching' => true, 'debug' => false, 'silent' => false]);
+
+        // API returns error in response body (200 OK but with error field)
+        $mock = new \GuzzleHttp\Handler\MockHandler([
+            new \GuzzleHttp\Psr7\Response(200, [], json_encode(['error' => 'Invalid event format'])),
+        ]);
+        $handlerStack = \GuzzleHttp\HandlerStack::create($mock);
+        $mockClient = new \GuzzleHttp\Client(['handler' => $handlerStack]);
+        $sdk->setHttpClient($mockClient);
+
+        // Track event
+        $sdk->track('auth.login_failed', ['actor_id' => 'user_123', 'user_ip' => '192.168.1.1']);
+
+        // Flush should throw due to error in response
+        // The RuntimeException from API error bubbles up directly
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Invalid event format');
+        $sdk->flush();
+    }
+
+    public function testEventRetryExhaustsAfter3Attempts(): void
+    {
+        // Create SDK with batching enabled
+        $sdk = new LiteSOC('test-key', ['batching' => true, 'debug' => false, 'silent' => true]);
+
+        // All attempts fail - need 4 mock responses:
+        // retry_count starts at 0, increments to 1, 2, 3
+        // when retry_count >= 3, event is dropped
+        $mock = new \GuzzleHttp\Handler\MockHandler([
+            // Attempt 1: retry_count = 0 -> becomes 1, requeued
+            new \GuzzleHttp\Exception\ConnectException('Fail 1', new \GuzzleHttp\Psr7\Request('POST', '/collect')),
+            // Attempt 2: retry_count = 1 -> becomes 2, requeued
+            new \GuzzleHttp\Exception\ConnectException('Fail 2', new \GuzzleHttp\Psr7\Request('POST', '/collect')),
+            // Attempt 3: retry_count = 2 -> becomes 3, requeued
+            new \GuzzleHttp\Exception\ConnectException('Fail 3', new \GuzzleHttp\Psr7\Request('POST', '/collect')),
+            // Attempt 4: retry_count = 3 -> NOT < 3, event dropped
+            new \GuzzleHttp\Exception\ConnectException('Fail 4', new \GuzzleHttp\Psr7\Request('POST', '/collect')),
+        ]);
+        $handlerStack = \GuzzleHttp\HandlerStack::create($mock);
+        $mockClient = new \GuzzleHttp\Client(['handler' => $handlerStack]);
+        $sdk->setHttpClient($mockClient);
+
+        // Track 1 event
+        $sdk->track('auth.login_failed', ['actor_id' => 'user_123', 'user_ip' => '192.168.1.1']);
+        $this->assertEquals(1, $sdk->getQueueSize());
+
+        // Flush attempt 1 - fails, requeues with retry_count=1
+        $sdk->flush();
+        $this->assertEquals(1, $sdk->getQueueSize());
+
+        // Flush attempt 2 - fails, requeues with retry_count=2
+        $sdk->flush();
+        $this->assertEquals(1, $sdk->getQueueSize());
+
+        // Flush attempt 3 - fails, requeues with retry_count=3
+        $sdk->flush();
+        $this->assertEquals(1, $sdk->getQueueSize());
+
+        // Flush attempt 4 - fails, retry_count=3 is NOT < 3, event dropped
+        $sdk->flush();
+        $this->assertEquals(0, $sdk->getQueueSize());
     }
 
     // ============================================
@@ -486,6 +650,59 @@ class LiteSOCTest extends TestCase
 
         // Queue should remain empty since batching is disabled
         $this->assertEquals(0, $sdk->getQueueSize());
+    }
+
+    public function testDebugModeOutputsLogs(): void
+    {
+        // Create SDK with debug enabled and batching enabled
+        $sdk = new LiteSOC('test-key', ['batching' => true, 'debug' => true]);
+
+        // Mock successful response
+        $mock = new \GuzzleHttp\Handler\MockHandler([
+            new \GuzzleHttp\Psr7\Response(202, [], json_encode(['status' => 'queued'])),
+        ]);
+        $handlerStack = \GuzzleHttp\HandlerStack::create($mock);
+        $mockClient = new \GuzzleHttp\Client(['handler' => $handlerStack]);
+        $sdk->setHttpClient($mockClient);
+
+        // Capture output
+        ob_start();
+        $sdk->track('auth.login_failed', ['actor_id' => 'user_123', 'user_ip' => '192.168.1.1']);
+        $sdk->flush();
+        $output = ob_get_clean();
+
+        // Verify debug output was generated
+        $this->assertStringContainsString('[LiteSOC]', $output);
+        $this->assertStringContainsString('Successfully sent event', $output);
+    }
+
+    public function testSilentModeHandlesErrorsGracefully(): void
+    {
+        // Create SDK in silent mode (errors logged, not thrown)
+        $sdk = new LiteSOC('test-key', ['batching' => true, 'debug' => true, 'silent' => true]);
+
+        // Mock failed response
+        $mock = new \GuzzleHttp\Handler\MockHandler([
+            new \GuzzleHttp\Exception\ConnectException(
+                'Connection refused',
+                new \GuzzleHttp\Psr7\Request('POST', '/collect')
+            ),
+        ]);
+        $handlerStack = \GuzzleHttp\HandlerStack::create($mock);
+        $mockClient = new \GuzzleHttp\Client(['handler' => $handlerStack]);
+        $sdk->setHttpClient($mockClient);
+
+        // Track event
+        $sdk->track('auth.login_failed', ['actor_id' => 'user_123', 'user_ip' => '192.168.1.1']);
+
+        // Capture output - in silent mode, errors are logged
+        ob_start();
+        $sdk->flush();
+        $output = ob_get_clean();
+
+        // Verify error was logged (not thrown)
+        $this->assertStringContainsString('[LiteSOC]', $output);
+        $this->assertStringContainsString('Failed to send event', $output);
     }
 
     // ============================================
@@ -1066,26 +1283,46 @@ class LiteSOCTest extends TestCase
             new \GuzzleHttp\Psr7\Response(200, [
                 'X-Plan' => 'enterprise',
             ], json_encode([
-                'events' => [
+                'success' => true,
+                'data' => [
                     ['id' => 'evt_1', 'event_name' => 'auth.login_failed'],
                     ['id' => 'evt_2', 'event_name' => 'auth.login_success'],
                 ],
-                'total' => 2,
+                'pagination' => [
+                    'total' => 2,
+                    'limit' => 20,
+                    'offset' => 0,
+                    'has_more' => false,
+                ],
+                'meta' => [
+                    'plan' => 'enterprise',
+                    'retention_days' => 365,
+                ],
             ])),
         ]);
 
         $result = $sdk->getEvents(20);
 
-        $this->assertArrayHasKey('events', $result);
-        $this->assertCount(2, $result['events']);
+        $this->assertArrayHasKey('data', $result);
+        $this->assertCount(2, $result['data']);
     }
 
     public function testGetEventsWithFilters(): void
     {
         $sdk = $this->createMockedSdk([
             new \GuzzleHttp\Psr7\Response(200, [], json_encode([
-                'events' => [['id' => 'evt_critical']],
-                'total' => 1,
+                'success' => true,
+                'data' => [['id' => 'evt_critical']],
+                'pagination' => [
+                    'total' => 1,
+                    'limit' => 50,
+                    'offset' => 10,
+                    'has_more' => false,
+                ],
+                'meta' => [
+                    'plan' => 'business',
+                    'retention_days' => 90,
+                ],
             ])),
         ]);
 
@@ -1096,23 +1333,31 @@ class LiteSOCTest extends TestCase
             'offset' => 10,
         ]);
 
-        $this->assertCount(1, $result['events']);
+        $this->assertCount(1, $result['data']);
     }
 
     public function testGetEventSuccess(): void
     {
         $sdk = $this->createMockedSdk([
             new \GuzzleHttp\Psr7\Response(200, [], json_encode([
-                'id' => 'evt_123',
-                'event_name' => 'auth.login_failed',
-                'actor' => ['id' => 'user_456', 'email' => 'user@example.com'],
+                'success' => true,
+                'data' => [
+                    'id' => 'evt_123',
+                    'event_name' => 'auth.login_failed',
+                    'actor' => ['id' => 'user_456', 'email' => 'user@example.com'],
+                ],
+                'meta' => [
+                    'plan' => 'business',
+                    'retention_days' => 90,
+                    'redacted' => false,
+                ],
             ])),
         ]);
 
         $result = $sdk->getEvent('evt_123');
 
-        $this->assertEquals('evt_123', $result['id']);
-        $this->assertEquals('auth.login_failed', $result['event_name']);
+        $this->assertEquals('evt_123', $result['data']['id']);
+        $this->assertEquals('auth.login_failed', $result['data']['event_name']);
     }
 
     public function testAuthenticationExceptionOnInvalidApiKey(): void

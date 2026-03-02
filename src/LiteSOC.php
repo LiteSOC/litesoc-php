@@ -40,7 +40,7 @@ use LiteSOC\ResponseMetadata;
  */
 class LiteSOC
 {
-    public const VERSION = '2.2.0';
+    public const VERSION = '2.3.0';
     public const DEFAULT_BASE_URL = 'https://api.litesoc.io';
 
     private string $apiKey;
@@ -387,6 +387,12 @@ class LiteSOC
     // ============================================
 
     /**
+     * Send events to the LiteSOC API.
+     *
+     * Note: The API only accepts single events, so this method sends
+     * each event individually. Batching is handled client-side for
+     * efficient queuing, but server requests are made one at a time.
+     *
      * @param array<int, array<string, mixed>> $events
      */
     private function sendEvents(array $events): void
@@ -396,43 +402,51 @@ class LiteSOC
         }
 
         $client = $this->getClient();
+        /** @var array<int, array<string, mixed>> $failedEvents */
+        $failedEvents = [];
+        $failedCount = 0;
 
-        try {
-            // Single event or batch
-            $isBatch = count($events) > 1;
+        foreach ($events as $event) {
+            try {
+                $payload = $this->eventToPayload($event);
 
-            if ($isBatch) {
-                $payload = ['events' => array_map([$this, 'eventToPayload'], $events)];
-            } else {
-                $payload = $this->eventToPayload($events[0]);
-            }
+                $response = $client->post($this->endpoint, [
+                    'json' => $payload,
+                    'timeout' => $this->timeout,
+                ]);
 
-            $response = $client->post($this->endpoint, [
-                'json' => $payload,
-                'timeout' => $this->timeout,
-            ]);
+                $result = json_decode($response->getBody()->getContents(), true);
 
-            $result = json_decode($response->getBody()->getContents(), true);
-
-            if ($result['success'] ?? false) {
-                $acceptedMsg = $isBatch ? " ({$result['events_accepted']} accepted)" : '';
-                $this->log('Successfully sent ' . count($events) . ' event(s)' . $acceptedMsg);
-            } else {
-                throw new \RuntimeException($result['error'] ?? 'Unknown API error');
-            }
-        } catch (GuzzleException $e) {
-            // Re-queue events for retry
-            $retryable = array_filter($events, fn($ev) => ($ev['retry_count'] ?? 0) < 3);
-
-            if (!empty($retryable) && $this->batching) {
-                $this->log('Re-queuing ' . count($retryable) . ' events for retry');
-                foreach ($retryable as &$event) {
-                    $event['retry_count'] = ($event['retry_count'] ?? 0) + 1;
+                // API returns { status: "queued" } or { status: "inserted" }
+                if (in_array($result['status'] ?? '', ['queued', 'inserted'], true)) {
+                    $this->log('Successfully sent event: ' . $event['event']);
+                } elseif (isset($result['error'])) {
+                    throw new \RuntimeException($result['error']);
+                } else {
+                    // Any 2xx response is considered success
+                    $this->log('Successfully sent event: ' . $event['event']);
                 }
-                $this->queue = array_merge($retryable, $this->queue);
+            } catch (GuzzleException $e) {
+                $this->log('Failed to send event ' . $event['event'] . ': ' . $e->getMessage());
+                
+                // Track failed event for retry
+                if (($event['retry_count'] ?? 0) < 3) {
+                    $event['retry_count'] = ($event['retry_count'] ?? 0) + 1;
+                    $failedEvents[] = $event;
+                }
+                $failedCount++;
             }
+        }
 
-            throw $e;
+        // Re-queue failed events for retry
+        if ($failedCount > 0 && $this->batching && $failedEvents !== []) {
+            $this->log('Re-queuing ' . count($failedEvents) . ' events for retry');
+            $this->queue = array_merge($failedEvents, $this->queue);
+        }
+
+        // If all events failed, throw to signal error
+        if ($failedCount === count($events) && $failedCount > 0) {
+            throw new \RuntimeException('All ' . count($events) . ' events failed to send');
         }
     }
 
@@ -442,12 +456,12 @@ class LiteSOC
      */
     private function eventToPayload(array $event): array
     {
+        // Note: timestamp is not sent - the API server generates it
         return [
             'event' => $event['event'],
             'actor' => $event['actor'],
             'user_ip' => $event['user_ip'],
             'metadata' => $event['metadata'],
-            'timestamp' => $event['timestamp'],
         ];
     }
 
