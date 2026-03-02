@@ -1013,32 +1013,10 @@ class LiteSOCTest extends TestCase
             'description' => 'Multiple failed login attempts from single IP',
             'source_ip' => '192.168.1.100',
             'actor_id' => 'user_123',
-            'trigger_event_id' => 'evt_xyz789',
-            'forensics' => [
-                'network' => [
-                    'is_vpn' => true,
-                    'is_tor' => false,
-                    'is_proxy' => false,
-                    'is_datacenter' => true,
-                    'is_mobile' => false,
-                    'asn' => 12345,
-                    'asn_org' => 'Example Hosting',
-                    'isp' => 'Example ISP',
-                ],
-                'location' => [
-                    'city' => 'New York',
-                    'region' => 'New York',
-                    'country_code' => 'US',
-                    'country_name' => 'United States',
-                    'latitude' => 40.7128,
-                    'longitude' => -74.006,
-                    'timezone' => 'America/New_York',
-                ],
-            ],
             'created_at' => '2026-03-01T12:00:00Z',
             'updated_at' => '2026-03-01T12:30:00Z',
             'resolved_at' => null,
-            'resolution_notes' => null,
+            'resolved_by' => null,
             'metadata' => ['attempts' => 50],
         ];
 
@@ -1049,12 +1027,6 @@ class LiteSOCTest extends TestCase
         $this->assertEquals('high', $alert->severity);
         $this->assertEquals('open', $alert->status);
         $this->assertEquals('Brute Force Attack Detected', $alert->title);
-        $this->assertEquals('evt_xyz789', $alert->triggerEventId);
-        $this->assertNotNull($alert->forensics);
-        $this->assertTrue($alert->forensics->network->isVpn);
-        $this->assertEquals(12345, $alert->forensics->network->asn);
-        $this->assertEquals('New York', $alert->forensics->location->city);
-        $this->assertEquals('US', $alert->forensics->location->countryCode);
         $this->assertEquals(['attempts' => 50], $alert->metadata);
     }
 
@@ -1071,28 +1043,29 @@ class LiteSOCTest extends TestCase
         $this->assertEquals('', $alert->severity);
         $this->assertEquals('', $alert->status);
         $this->assertEquals('', $alert->title);
-        $this->assertNull($alert->triggerEventId);
-        $this->assertNull($alert->forensics);
+        $this->assertNull($alert->resolvedBy);
         $this->assertNull($alert->description);
     }
 
-    public function testAlertFromArrayNullForensicsFreeTier(): void
+    public function testAlertFromArrayWithResolvedBy(): void
     {
         $data = [
-            'id' => 'alert_free',
+            'id' => 'alert_resolved',
             'alert_type' => 'geo_anomaly',
             'severity' => 'medium',
-            'status' => 'open',
+            'status' => 'resolved',
             'title' => 'Geographic Anomaly',
-            'trigger_event_id' => 'evt_123',
-            'forensics' => null,
+            'resolved_by' => 'user_abc123',
+            'resolved_at' => '2026-03-01T14:00:00Z',
+            'metadata' => ['internal_notes' => 'False positive - user traveling'],
         ];
 
         $alert = Alert::fromArray($data);
 
-        $this->assertEquals('alert_free', $alert->id);
-        $this->assertEquals('evt_123', $alert->triggerEventId);
-        $this->assertNull($alert->forensics);
+        $this->assertEquals('alert_resolved', $alert->id);
+        $this->assertEquals('user_abc123', $alert->resolvedBy);
+        $this->assertEquals('2026-03-01T14:00:00Z', $alert->resolvedAt);
+        $this->assertEquals(['internal_notes' => 'False positive - user traveling'], $alert->metadata);
     }
 
     public function testAlertToArray(): void
@@ -1103,44 +1076,35 @@ class LiteSOCTest extends TestCase
             severity: 'critical',
             status: 'open',
             title: 'Impossible Travel Detected',
-            triggerEventId: 'evt_abc',
-            forensics: new Forensics(
-                network: new NetworkForensics(
-                    isVpn: false,
-                    isTor: true,
-                    isProxy: false,
-                    isDatacenter: false,
-                    isMobile: false,
-                ),
-                location: new LocationForensics(city: 'Paris', countryCode: 'FR'),
-            ),
+            resolvedBy: 'security-team',
+            metadata: ['source' => 'automated_detection'],
         );
 
         $result = $alert->toArray();
 
         $this->assertEquals('alert_test', $result['id']);
-        $this->assertEquals('evt_abc', $result['trigger_event_id']);
-        $this->assertNotNull($result['forensics']);
-        $this->assertTrue($result['forensics']['network']['is_tor']);
-        $this->assertEquals('Paris', $result['forensics']['location']['city']);
+        $this->assertEquals('impossible_travel', $result['alert_type']);
+        $this->assertEquals('critical', $result['severity']);
+        $this->assertEquals('security-team', $result['resolved_by']);
+        $this->assertEquals(['source' => 'automated_detection'], $result['metadata']);
     }
 
-    public function testAlertToArrayNullForensics(): void
+    public function testAlertToArrayNullResolvedBy(): void
     {
         $alert = new Alert(
-            id: 'alert_no_forensics',
+            id: 'alert_open',
             alertType: 'suspicious_activity',
             severity: 'low',
-            status: 'resolved',
+            status: 'open',
             title: 'Suspicious Activity',
-            forensics: null,
+            resolvedBy: null,
         );
 
         $result = $alert->toArray();
 
-        $this->assertEquals('alert_no_forensics', $result['id']);
-        $this->assertNull($result['forensics']);
-        $this->assertNull($result['trigger_event_id']);
+        $this->assertEquals('alert_open', $result['id']);
+        $this->assertNull($result['resolved_by']);
+        $this->assertNull($result['resolved_at']);
     }
 
     // ============================================

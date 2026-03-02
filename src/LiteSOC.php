@@ -9,6 +9,7 @@ use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\RequestException;
 use LiteSOC\Exceptions\LiteSOCException;
 use LiteSOC\Exceptions\AuthenticationException;
+use LiteSOC\Exceptions\NotFoundException;
 use LiteSOC\Exceptions\RateLimitException;
 use LiteSOC\Exceptions\PlanRestrictedException;
 use LiteSOC\ResponseMetadata;
@@ -497,6 +498,7 @@ class LiteSOC
      *
      * @throws AuthenticationException If API key is invalid (401)
      * @throws PlanRestrictedException If feature requires higher plan (403)
+     * @throws NotFoundException If resource not found (404)
      * @throws RateLimitException If rate limit exceeded (429)
      * @throws LiteSOCException For other API errors
      */
@@ -516,6 +518,10 @@ class LiteSOC
             $requiredPlan = $data['required_plan'] ?? 'Business or Enterprise';
             $upgradeHint = " Upgrade to {$requiredPlan} plan to access this feature.";
             throw new PlanRestrictedException($message . $upgradeHint, $requiredPlan, $body, $e);
+        }
+
+        if ($statusCode === 404) {
+            throw new NotFoundException($message, $body, $e);
         }
 
         if ($statusCode === 429) {
@@ -611,6 +617,7 @@ class LiteSOC
      * @return array<string, mixed> The alert data
      * @throws AuthenticationException If API key is invalid
      * @throws PlanRestrictedException If plan doesn't support Management API
+     * @throws NotFoundException If alert not found
      * @throws RateLimitException If rate limit exceeded
      * @throws LiteSOCException For other API errors
      */
@@ -634,6 +641,7 @@ class LiteSOC
      * @return array<string, mixed> The updated alert
      * @throws AuthenticationException If API key is invalid
      * @throws PlanRestrictedException If plan doesn't support Management API
+     * @throws NotFoundException If alert not found
      * @throws RateLimitException If rate limit exceeded
      * @throws LiteSOCException For other API errors
      */
@@ -665,6 +673,7 @@ class LiteSOC
      * @return array<string, mixed> The updated alert
      * @throws AuthenticationException If API key is invalid
      * @throws PlanRestrictedException If plan doesn't support Management API
+     * @throws NotFoundException If alert not found
      * @throws RateLimitException If rate limit exceeded
      * @throws LiteSOCException For other API errors
      */
@@ -716,6 +725,7 @@ class LiteSOC
      * @return array<string, mixed> The event data
      * @throws AuthenticationException If API key is invalid
      * @throws PlanRestrictedException If plan doesn't support Management API
+     * @throws NotFoundException If event not found
      * @throws RateLimitException If rate limit exceeded
      * @throws LiteSOCException For other API errors
      */

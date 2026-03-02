@@ -17,9 +17,8 @@ namespace LiteSOC;
  * foreach ($alertsData['data'] ?? [] as $alertData) {
  *     $alert = Alert::fromArray($alertData);
  *     echo "{$alert->title} - {$alert->severity}\n";
- *     if ($alert->forensics !== null) {
- *         echo "  VPN: " . ($alert->forensics->network->isVpn ? 'Yes' : 'No') . "\n";
- *         echo "  Location: " . $alert->forensics->location->city . "\n";
+ *     if ($alert->resolvedBy !== null) {
+ *         echo "  Resolved by: {$alert->resolvedBy}\n";
  *     }
  * }
  * ```
@@ -35,13 +34,11 @@ class Alert
      * @param string|null $description Detailed alert description
      * @param string|null $sourceIp Source IP address that triggered the alert
      * @param string|null $actorId Actor/user ID associated with the alert
-     * @param string|null $triggerEventId The event ID that triggered this alert
-     * @param Forensics|null $forensics Forensics data (Pro/Enterprise only, null for Free tier)
      * @param string|null $createdAt ISO 8601 timestamp when alert was created
      * @param string|null $updatedAt ISO 8601 timestamp when alert was last updated
      * @param string|null $resolvedAt ISO 8601 timestamp when alert was resolved
-     * @param string|null $resolutionNotes Notes explaining the resolution
-     * @param array<string, mixed>|null $metadata Additional metadata
+     * @param string|null $resolvedBy User ID or identifier who resolved the alert
+     * @param array<string, mixed>|null $metadata Additional metadata (may contain internal_notes, resolution_type, etc.)
      */
     public function __construct(
         public readonly string $id,
@@ -52,12 +49,10 @@ class Alert
         public readonly ?string $description = null,
         public readonly ?string $sourceIp = null,
         public readonly ?string $actorId = null,
-        public readonly ?string $triggerEventId = null,
-        public readonly ?Forensics $forensics = null,
         public readonly ?string $createdAt = null,
         public readonly ?string $updatedAt = null,
         public readonly ?string $resolvedAt = null,
-        public readonly ?string $resolutionNotes = null,
+        public readonly ?string $resolvedBy = null,
         public readonly ?array $metadata = null,
     ) {}
 
@@ -78,12 +73,10 @@ class Alert
             description: $data['description'] ?? null,
             sourceIp: $data['source_ip'] ?? null,
             actorId: $data['actor_id'] ?? null,
-            triggerEventId: $data['trigger_event_id'] ?? null,
-            forensics: Forensics::fromArray($data['forensics'] ?? null),
             createdAt: $data['created_at'] ?? null,
             updatedAt: $data['updated_at'] ?? null,
             resolvedAt: $data['resolved_at'] ?? null,
-            resolutionNotes: $data['resolution_notes'] ?? null,
+            resolvedBy: $data['resolved_by'] ?? null,
             metadata: $data['metadata'] ?? null,
         );
     }
@@ -104,12 +97,10 @@ class Alert
             'description' => $this->description,
             'source_ip' => $this->sourceIp,
             'actor_id' => $this->actorId,
-            'trigger_event_id' => $this->triggerEventId,
-            'forensics' => $this->forensics?->toArray(),
             'created_at' => $this->createdAt,
             'updated_at' => $this->updatedAt,
             'resolved_at' => $this->resolvedAt,
-            'resolution_notes' => $this->resolutionNotes,
+            'resolved_by' => $this->resolvedBy,
             'metadata' => $this->metadata,
         ];
     }
