@@ -616,6 +616,10 @@ class LiteSOC
      */
     public function getAlerts(array $filters = []): array
     {
+        // Apply default limit if not specified (matches lsoc_app default)
+        if (!isset($filters['limit'])) {
+            $filters['limit'] = 100;
+        }
         $this->log('Fetching alerts');
         return $this->apiRequest('GET', '/alerts', $filters);
     }
