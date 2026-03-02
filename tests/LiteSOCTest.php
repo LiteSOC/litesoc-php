@@ -70,7 +70,7 @@ class LiteSOCTest extends TestCase
 
     public function testVersionIsTwo(): void
     {
-        $this->assertEquals('2.3.0', LiteSOC::VERSION);
+        $this->assertEquals('2.3.1', LiteSOC::VERSION);
     }
 
     public function testDefaultBaseUrl(): void
@@ -1275,6 +1275,40 @@ class LiteSOCTest extends TestCase
         $result = $sdk->markAlertSafe('alert_abc');
 
         $this->assertEquals('safe', $result['status']);
+    }
+
+    public function testResolveAlertWithResolvedBy(): void
+    {
+        $sdk = $this->createMockedSdk([
+            new \GuzzleHttp\Psr7\Response(200, [], json_encode([
+                'id' => 'alert_123',
+                'status' => 'resolved',
+                'resolved_by' => 'security-team',
+            ])),
+        ]);
+
+        $result = $sdk->resolveAlert('alert_123', 'blocked_ip', 'IP blocked', 'security-team');
+
+        $this->assertEquals('alert_123', $result['id']);
+        $this->assertEquals('resolved', $result['status']);
+        $this->assertEquals('security-team', $result['resolved_by']);
+    }
+
+    public function testMarkAlertSafeWithResolvedBy(): void
+    {
+        $sdk = $this->createMockedSdk([
+            new \GuzzleHttp\Psr7\Response(200, [], json_encode([
+                'id' => 'alert_xyz',
+                'status' => 'safe',
+                'resolved_by' => 'automation-v1',
+            ])),
+        ]);
+
+        $result = $sdk->markAlertSafe('alert_xyz', 'Expected behavior', 'automation-v1');
+
+        $this->assertEquals('alert_xyz', $result['id']);
+        $this->assertEquals('safe', $result['status']);
+        $this->assertEquals('automation-v1', $result['resolved_by']);
     }
 
     public function testGetEventsSuccess(): void

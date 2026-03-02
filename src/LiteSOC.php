@@ -40,7 +40,7 @@ use LiteSOC\ResponseMetadata;
  */
 class LiteSOC
 {
-    public const VERSION = '2.3.0';
+    public const VERSION = '2.3.1';
     public const DEFAULT_BASE_URL = 'https://api.litesoc.io';
 
     private string $apiKey;
@@ -629,13 +629,15 @@ class LiteSOC
      * @param string $resolutionType Resolution type ('blocked_ip', 'reset_password', 
      *                               'contacted_user', 'false_positive', 'other')
      * @param string $notes Optional resolution notes
+     * @param string $resolvedBy Optional identifier for who/what resolved the alert
+     *                           (e.g., 'security-team', 'automation-v1'). Defaults to 'n8n-api'.
      * @return array<string, mixed> The updated alert
      * @throws AuthenticationException If API key is invalid
      * @throws PlanRestrictedException If plan doesn't support Management API
      * @throws RateLimitException If rate limit exceeded
      * @throws LiteSOCException For other API errors
      */
-    public function resolveAlert(string $alertId, string $resolutionType, string $notes = ''): array
+    public function resolveAlert(string $alertId, string $resolutionType, string $notes = '', string $resolvedBy = ''): array
     {
         $this->log('Resolving alert: ' . $alertId);
         $body = [
@@ -644,6 +646,9 @@ class LiteSOC
         ];
         if ($notes !== '') {
             $body['internal_notes'] = $notes;
+        }
+        if ($resolvedBy !== '') {
+            $body['resolved_by'] = $resolvedBy;
         }
         return $this->apiRequest('PATCH', '/alerts/' . urlencode($alertId), $body);
     }
@@ -655,13 +660,15 @@ class LiteSOC
      *
      * @param string $alertId The alert ID to mark as safe
      * @param string $notes Optional notes explaining why it's safe
+     * @param string $resolvedBy Optional identifier for who/what marked the alert safe
+     *                           (e.g., 'security-team', 'automation-v1'). Defaults to 'n8n-api'.
      * @return array<string, mixed> The updated alert
      * @throws AuthenticationException If API key is invalid
      * @throws PlanRestrictedException If plan doesn't support Management API
      * @throws RateLimitException If rate limit exceeded
      * @throws LiteSOCException For other API errors
      */
-    public function markAlertSafe(string $alertId, string $notes = ''): array
+    public function markAlertSafe(string $alertId, string $notes = '', string $resolvedBy = ''): array
     {
         $this->log('Marking alert as safe: ' . $alertId);
         $body = [
@@ -669,6 +676,9 @@ class LiteSOC
         ];
         if ($notes !== '') {
             $body['internal_notes'] = $notes;
+        }
+        if ($resolvedBy !== '') {
+            $body['resolved_by'] = $resolvedBy;
         }
         return $this->apiRequest('PATCH', '/alerts/' . urlencode($alertId), $body);
     }

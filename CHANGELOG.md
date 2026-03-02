@@ -5,6 +5,22 @@ All notable changes to the LiteSOC PHP SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.1] - 2026-03-02
+
+### Added
+
+#### API Compliance - `/api/v1/alerts/[id]` PATCH endpoint
+- **`resolveAlert()`** - Added optional `$resolvedBy` parameter to specify who/what resolved the alert
+  - Sends `resolved_by` field in request body when provided
+  - Matches Python SDK and API specification
+- **`markAlertSafe()`** - Added optional `$resolvedBy` parameter to specify who/what marked the alert safe
+  - Sends `resolved_by` field in request body when provided
+  - Matches Python SDK and API specification
+
+### Tests
+- Added `testResolveAlertWithResolvedBy()` - verifies resolved_by parameter for resolve action
+- Added `testMarkAlertSafeWithResolvedBy()` - verifies resolved_by parameter for mark_safe action
+
 ## [2.3.0] - 2026-03-02
 
 ### Fixed
