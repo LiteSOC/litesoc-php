@@ -70,9 +70,19 @@ final class ResponseMetadata
         }
 
         $plan = $normalizedHeaders['x-litesoc-plan'] ?? null;
-        $retentionDays = isset($normalizedHeaders['x-litesoc-retention'])
-            ? (int) $normalizedHeaders['x-litesoc-retention']
-            : null;
+        
+        // Parse retention days - API may return "30 days" or "30" format
+        $retentionDays = null;
+        $retentionStr = $normalizedHeaders['x-litesoc-retention'] ?? null;
+        if ($retentionStr !== null) {
+            // Handle both "30 days" and "30" formats
+            $retentionStr = trim((string) $retentionStr);
+            if (str_ends_with($retentionStr, ' days')) {
+                $retentionStr = substr($retentionStr, 0, -5); // Remove " days" suffix
+            }
+            $retentionDays = is_numeric($retentionStr) ? (int) $retentionStr : null;
+        }
+        
         $cutoffDate = $normalizedHeaders['x-litesoc-cutoff'] ?? null;
 
         return new self($plan, $retentionDays, $cutoffDate);

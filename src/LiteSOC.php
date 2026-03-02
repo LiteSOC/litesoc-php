@@ -12,6 +12,7 @@ use LiteSOC\Exceptions\AuthenticationException;
 use LiteSOC\Exceptions\NotFoundException;
 use LiteSOC\Exceptions\RateLimitException;
 use LiteSOC\Exceptions\PlanRestrictedException;
+use LiteSOC\Exceptions\ValidationException;
 use LiteSOC\ResponseMetadata;
 
 /**
@@ -499,6 +500,7 @@ class LiteSOC
      * @throws AuthenticationException If API key is invalid (401)
      * @throws PlanRestrictedException If feature requires higher plan (403)
      * @throws NotFoundException If resource not found (404)
+     * @throws ValidationException If request validation fails (400)
      * @throws RateLimitException If rate limit exceeded (429)
      * @throws LiteSOCException For other API errors
      */
@@ -510,12 +512,16 @@ class LiteSOC
         $data = $body ? json_decode($body, true) : null;
         $message = $data['error'] ?? $e->getMessage();
 
+        if ($statusCode === 400) {
+            throw new ValidationException($message, $body, $e);
+        }
+
         if ($statusCode === 401) {
             throw new AuthenticationException($message, $body, $e);
         }
 
         if ($statusCode === 403) {
-            $requiredPlan = $data['required_plan'] ?? 'Business or Enterprise';
+            $requiredPlan = $data['required_plan'] ?? 'Pro or Enterprise';
             $upgradeHint = " Upgrade to {$requiredPlan} plan to access this feature.";
             throw new PlanRestrictedException($message . $upgradeHint, $requiredPlan, $body, $e);
         }
@@ -581,13 +587,13 @@ class LiteSOC
     }
 
     // ============================================
-    // MANAGEMENT API METHODS (Business/Enterprise)
+    // MANAGEMENT API METHODS (Pro/Enterprise)
     // ============================================
 
     /**
      * Get alerts from the Management API
      *
-     * Requires Business or Enterprise plan.
+     * Requires Pro or Enterprise plan.
      *
      * @param array{
      *     status?: string,
@@ -595,10 +601,16 @@ class LiteSOC
      *     alert_type?: string,
      *     limit?: int,
      *     offset?: int,
-     * } $filters Optional filters
+     * } $filters Optional filters:
+     *     - status: Filter by status ('open', 'acknowledged', 'resolved', 'dismissed')
+     *     - severity: Filter by severity ('low', 'medium', 'high', 'critical')
+     *     - alert_type: Filter by type ('impossible_travel', 'brute_force_attack', 'geo_anomaly', etc.)
+     *     - limit: Maximum number of alerts to return (default: 100, max: 500)
+     *     - offset: Number of alerts to skip for pagination (default: 0)
      * @return array<string, mixed>
      * @throws AuthenticationException If API key is invalid
      * @throws PlanRestrictedException If plan doesn't support Management API
+     * @throws ValidationException If request validation fails
      * @throws RateLimitException If rate limit exceeded
      * @throws LiteSOCException For other API errors
      */
@@ -611,7 +623,7 @@ class LiteSOC
     /**
      * Get a specific alert by ID
      *
-     * Requires Business or Enterprise plan.
+     * Requires Pro or Enterprise plan.
      *
      * @param string $alertId The alert ID
      * @return array<string, mixed> The alert data
@@ -630,7 +642,7 @@ class LiteSOC
     /**
      * Resolve an alert
      *
-     * Requires Business or Enterprise plan.
+     * Requires Pro or Enterprise plan.
      *
      * @param string $alertId The alert ID to resolve
      * @param string $resolutionType Resolution type ('blocked_ip', 'reset_password', 
@@ -642,6 +654,7 @@ class LiteSOC
      * @throws AuthenticationException If API key is invalid
      * @throws PlanRestrictedException If plan doesn't support Management API
      * @throws NotFoundException If alert not found
+     * @throws ValidationException If request validation fails
      * @throws RateLimitException If rate limit exceeded
      * @throws LiteSOCException For other API errors
      */
@@ -664,7 +677,7 @@ class LiteSOC
     /**
      * Mark an alert as safe (false positive)
      *
-     * Requires Business or Enterprise plan.
+     * Requires Pro or Enterprise plan.
      *
      * @param string $alertId The alert ID to mark as safe
      * @param string $notes Optional notes explaining why it's safe
@@ -674,6 +687,7 @@ class LiteSOC
      * @throws AuthenticationException If API key is invalid
      * @throws PlanRestrictedException If plan doesn't support Management API
      * @throws NotFoundException If alert not found
+     * @throws ValidationException If request validation fails
      * @throws RateLimitException If rate limit exceeded
      * @throws LiteSOCException For other API errors
      */
@@ -695,22 +709,26 @@ class LiteSOC
     /**
      * Get events from the Management API
      *
-     * Requires Business or Enterprise plan.
+     * Available to all plans. Free tier users will have some forensic
+     * fields (network_intelligence, precise geolocation) redacted.
      *
-     * @param int $limit Maximum number of events to return (default: 20, max: 100)
+     * @param int $limit Maximum number of events to return (default: 50, max: 100)
      * @param array{
      *     event_name?: string,
      *     actor_id?: string,
      *     severity?: string,
      *     offset?: int,
-     * } $filters Optional filters
+     * } $filters Optional filters:
+     *     - event_name: Filter by event name (e.g., 'auth.login_failed')
+     *     - actor_id: Filter by actor ID
+     *     - severity: Filter by severity ('critical', 'warning', 'info')
+     *     - offset: Number of events to skip for pagination (default: 0)
      * @return array<string, mixed>
      * @throws AuthenticationException If API key is invalid
-     * @throws PlanRestrictedException If plan doesn't support Management API
      * @throws RateLimitException If rate limit exceeded
      * @throws LiteSOCException For other API errors
      */
-    public function getEvents(int $limit = 20, array $filters = []): array
+    public function getEvents(int $limit = 50, array $filters = []): array
     {
         $this->log('Fetching events');
         return $this->apiRequest('GET', '/events', array_merge(['limit' => $limit], $filters));
@@ -719,12 +737,12 @@ class LiteSOC
     /**
      * Get a specific event by ID
      *
-     * Requires Business or Enterprise plan.
+     * Available to all plans. Free tier users will have some forensic
+     * fields redacted.
      *
      * @param string $eventId The event ID
      * @return array<string, mixed> The event data
      * @throws AuthenticationException If API key is invalid
-     * @throws PlanRestrictedException If plan doesn't support Management API
      * @throws NotFoundException If event not found
      * @throws RateLimitException If rate limit exceeded
      * @throws LiteSOCException For other API errors

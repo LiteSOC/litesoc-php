@@ -8,7 +8,7 @@ namespace LiteSOC\Exceptions;
  * Exception thrown when feature is not available on current plan (403 Forbidden)
  *
  * This indicates the requested feature requires a higher subscription tier.
- * The Management API requires a Business or Enterprise plan.
+ * The Management API (alerts) requires a Pro or Enterprise plan.
  *
  * Upgrade your plan at: https://www.litesoc.io/pricing
  */
@@ -22,7 +22,7 @@ class PlanRestrictedException extends LiteSOCException
     private ?string $requiredPlan;
 
     public function __construct(
-        string $message = 'This feature requires a Business or Enterprise plan. Upgrade at: https://www.litesoc.io/pricing',
+        string $message = 'This feature requires a Pro or Enterprise plan. Upgrade at: https://www.litesoc.io/pricing',
         ?string $requiredPlan = null,
         ?string $responseBody = null,
         ?\Throwable $previous = null

@@ -624,7 +624,7 @@ class LiteSOCTest extends TestCase
     {
         $exception = new PlanRestrictedException();
 
-        $this->assertEquals('This feature requires a Business or Enterprise plan. Upgrade at: https://www.litesoc.io/pricing', $exception->getMessage());
+        $this->assertEquals('This feature requires a Pro or Enterprise plan. Upgrade at: https://www.litesoc.io/pricing', $exception->getMessage());
         $this->assertNull($exception->getRequiredPlan());
         $this->assertEquals('https://www.litesoc.io/pricing', $exception->getUpgradeUrl());
     }
