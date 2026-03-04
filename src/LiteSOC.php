@@ -42,7 +42,7 @@ use LiteSOC\ResponseMetadata;
  */
 class LiteSOC
 {
-    public const VERSION = '2.4.0';
+    public const VERSION = '2.5.0';
     public const DEFAULT_BASE_URL = 'https://api.litesoc.io';
 
     private string $apiKey;
@@ -261,6 +261,111 @@ class LiteSOC
     }
 
     // ============================================
+    // BATCH EVENT INGESTION
+    // ============================================
+
+    /**
+     * Track a batch of security events in a single API request.
+     *
+     * Use this instead of calling track() in a loop when you already have a
+     * set of events ready to send.  The SDK posts { "events": […] } to
+     * /collect, which uses Redis pipelining server-side so the entire batch
+     * costs one Upstash request unit instead of N.
+     *
+     * - Maximum 100 events per call.
+     * - Quota is reserved atomically for the full batch.
+     * - Rate-limit counter is incremented by the batch size, not by 1.
+     *
+     * @param array<int, array{
+     *     event_name?: string,
+     *     event?: string,
+     *     actor_id?: string,
+     *     actor_email?: string,
+     *     actor?: string|array{id?: string, email?: string},
+     *     user_ip?: string,
+     *     metadata?: array<string, mixed>
+     * }> $events
+     * @return int Number of events accepted by the server
+     * @throws \InvalidArgumentException If events array is empty or exceeds 100 items
+     *
+     * @example
+     * ```php
+     * $accepted = $litesoc->trackBatch([
+     *     [
+     *         'event_name'  => 'auth.login_success',
+     *         'actor_id'    => $user->id,
+     *         'actor_email' => $user->email,
+     *         'user_ip'     => $request->ip(),
+     *     ],
+     *     [
+     *         'event_name' => 'data.export',
+     *         'actor_id'   => $user->id,
+     *         'user_ip'    => $request->ip(),
+     *         'metadata'   => ['rows' => 500, 'table' => 'orders'],
+     *     ],
+     * ]);
+     * echo "{$accepted} events accepted";
+     * ```
+     */
+    public function trackBatch(array $events): int
+    {
+        if (empty($events)) {
+            throw new \InvalidArgumentException('trackBatch requires at least one event');
+        }
+        if (count($events) > 100) {
+            throw new \InvalidArgumentException('trackBatch supports up to 100 events per call. Split into multiple calls.');
+        }
+
+        $payload = [];
+        foreach ($events as $item) {
+            $actor = null;
+            if (isset($item['actor'])) {
+                if (is_string($item['actor'])) {
+                    $actor = ['id' => $item['actor'], 'email' => $item['actor_email'] ?? null];
+                } elseif (is_array($item['actor'])) {
+                    $actor = [
+                        'id'    => $item['actor']['id'] ?? null,
+                        'email' => $item['actor']['email'] ?? $item['actor_email'] ?? null,
+                    ];
+                }
+            } elseif (isset($item['actor_id'])) {
+                $actor = ['id' => $item['actor_id'], 'email' => $item['actor_email'] ?? null];
+            } elseif (isset($item['actor_email'])) {
+                $actor = ['id' => $item['actor_email'], 'email' => $item['actor_email']];
+            }
+
+            $metadata = $item['metadata'] ?? [];
+            $metadata['_sdk']         = 'litesoc-php';
+            $metadata['_sdk_version'] = self::VERSION;
+
+            $payload[] = [
+                'event'    => $item['event_name'] ?? $item['event'] ?? '',
+                'actor'    => $actor,
+                'user_ip'  => $item['user_ip'] ?? null,
+                'metadata' => $metadata,
+            ];
+        }
+
+        try {
+            $client   = $this->getClient();
+            $response = $client->post($this->endpoint, [
+                'json'    => ['events' => $payload],
+                'timeout' => $this->timeout,
+            ]);
+
+            /** @var array<string, mixed> $result */
+            $result   = json_decode($response->getBody()->getContents(), true);
+            $accepted = $result['queued'] ?? $result['inserted'] ?? count($payload);
+            $this->log("trackBatch: {$accepted} event(s) accepted");
+
+            return (int) $accepted;
+        } catch (\Throwable $e) {
+            $this->handleError('trackBatch', $e);
+            return 0;
+        }
+    }
+
+    // ============================================
     // CONVENIENCE METHODS
     // ============================================
 
@@ -392,8 +497,9 @@ class LiteSOC
      * Send events to the LiteSOC API.
      *
      * Note: The API only accepts single events, so this method sends
-     * each event individually. Batching is handled client-side for
-     * efficient queuing, but server requests are made one at a time.
+     * Single event: flat payload { event, actor, … } (unchanged behaviour).
+     * Multiple events: batch format { events: […] } — one HTTP request instead
+     * of N, saving latency and Upstash request-unit costs.
      *
      * @param array<int, array<string, mixed>> $events
      */
@@ -404,51 +510,49 @@ class LiteSOC
         }
 
         $client = $this->getClient();
-        /** @var array<int, array<string, mixed>> $failedEvents */
-        $failedEvents = [];
-        $failedCount = 0;
 
-        foreach ($events as $event) {
-            try {
-                $payload = $this->eventToPayload($event);
+        // Build payload once
+        if (count($events) === 1) {
+            $payload = $this->eventToPayload($events[0]);
+        } else {
+            $payload = ['events' => array_map([$this, 'eventToPayload'], $events)];
+        }
 
-                $response = $client->post($this->endpoint, [
-                    'json' => $payload,
-                    'timeout' => $this->timeout,
-                ]);
+        try {
+            $response = $client->post($this->endpoint, [
+                'json'    => $payload,
+                'timeout' => $this->timeout,
+            ]);
 
-                $result = json_decode($response->getBody()->getContents(), true);
+            /** @var array<string, mixed> $result */
+            $result = json_decode($response->getBody()->getContents(), true);
 
-                // API returns { status: "queued" } or { status: "inserted" }
-                if (in_array($result['status'] ?? '', ['queued', 'inserted'], true)) {
-                    $this->log('Successfully sent event: ' . $event['event']);
-                } elseif (isset($result['error'])) {
-                    throw new \RuntimeException($result['error']);
-                } else {
-                    // Any 2xx response is considered success
-                    $this->log('Successfully sent event: ' . $event['event']);
-                }
-            } catch (GuzzleException $e) {
-                $this->log('Failed to send event ' . $event['event'] . ': ' . $e->getMessage());
-                
-                // Track failed event for retry
+            if (in_array($result['status'] ?? '', ['queued', 'inserted'], true)) {
+                $count = $result['queued'] ?? $result['inserted'] ?? count($events);
+                $this->log("Successfully sent {$count} event(s)");
+            } elseif (isset($result['error'])) {
+                throw new \RuntimeException((string) $result['error']);
+            } else {
+                $this->log('Successfully sent ' . count($events) . ' event(s)');
+            }
+        } catch (GuzzleException $e) {
+            $this->log('Failed to send batch of ' . count($events) . ' event(s): ' . $e->getMessage());
+
+            /** @var array<int, array<string, mixed>> $failedEvents */
+            $failedEvents = [];
+            foreach ($events as $event) {
                 if (($event['retry_count'] ?? 0) < 3) {
                     $event['retry_count'] = ($event['retry_count'] ?? 0) + 1;
                     $failedEvents[] = $event;
                 }
-                $failedCount++;
             }
-        }
 
-        // Re-queue failed events for retry
-        if ($failedCount > 0 && $this->batching && $failedEvents !== []) {
-            $this->log('Re-queuing ' . count($failedEvents) . ' events for retry');
-            $this->queue = array_merge($failedEvents, $this->queue);
-        }
+            if ($this->batching && $failedEvents !== []) {
+                $this->log('Re-queuing ' . count($failedEvents) . ' event(s) for retry');
+                $this->queue = array_merge($failedEvents, $this->queue);
+            }
 
-        // If all events failed, throw to signal error
-        if ($failedCount === count($events) && $failedCount > 0) {
-            throw new \RuntimeException('All ' . count($events) . ' events failed to send');
+            throw new \RuntimeException('Failed to send ' . count($events) . ' event(s): ' . $e->getMessage());
         }
     }
 

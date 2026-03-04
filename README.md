@@ -40,6 +40,7 @@ $litesoc->flush();
 - ✅ **Management API** - Query alerts and events programmatically (Business/Enterprise plans)
 - ✅ **Custom exceptions** - Specific exceptions for auth, rate limits, and plan restrictions
 - ✅ **Automatic batching** - Events are batched for efficient delivery
+- ✅ **Batch ingestion helper** - `trackBatch()` sends up to 100 events in a single request
 - ✅ **Retry logic** - Failed events are automatically retried
 - ✅ **Laravel integration** - Service provider, facade, and config publishing
 - ✅ **PHP 8.2+** - Modern PHP with full type declarations
@@ -98,6 +99,35 @@ $litesoc->track('auth.login_failed', [
     'actor_email' => 'user@example.com',
     'user_ip' => '192.168.1.1'
 ]);
+```
+
+### Batch Ingestion with `trackBatch` (v2.5.0+)
+
+To reduce HTTP overhead and align with the backend batch ingestion contract,
+you can send up to **100 events** in a single call:
+
+```php
+use LiteSOC\LiteSOC;
+
+$litesoc = new LiteSOC('your-api-key');
+
+$accepted = $litesoc->trackBatch([
+    [
+        'event_name'  => 'auth.login_success',
+        'actor_id'    => 'user_123',
+        'actor_email' => 'user@example.com',
+        'user_ip'     => '203.0.113.50',
+        'metadata'    => ['method' => 'password'],
+    ],
+    [
+        'event_name' => 'data.export',
+        'actor_id'   => 'user_123',
+        'user_ip'    => '203.0.113.50',
+        'metadata'   => ['table' => 'orders', 'rows' => 500],
+    ],
+]);
+
+echo "{$accepted} events accepted";
 ```
 
 ### Using Event Type Constants
