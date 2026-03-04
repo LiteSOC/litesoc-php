@@ -73,7 +73,7 @@ class LiteSOCTest extends TestCase
 
     public function testVersionIsTwo(): void
     {
-        $this->assertEquals('2.4.0', LiteSOC::VERSION);
+        $this->assertEquals('2.5.0', LiteSOC::VERSION);
     }
 
     public function testDefaultBaseUrl(): void
@@ -379,11 +379,11 @@ class LiteSOCTest extends TestCase
         $sdk->track('auth.login_success', ['actor_id' => 'user_456', 'user_ip' => '10.0.0.1']);
         $this->assertEquals(2, $sdk->getQueueSize());
 
-        // Flush - first succeeds, second fails and gets requeued
+        // Flush - the batch request succeeds, no events are requeued
         $sdk->flush();
-        
-        // Failed event should be requeued with retry_count incremented
-        $this->assertEquals(1, $sdk->getQueueSize());
+
+        // In the batched implementation, a single successful call clears the queue
+        $this->assertEquals(0, $sdk->getQueueSize());
     }
 
     public function testFlushWithAllEventsFailedThrows(): void
@@ -405,9 +405,9 @@ class LiteSOCTest extends TestCase
         // Track 1 event
         $sdk->track('auth.login_failed', ['actor_id' => 'user_123', 'user_ip' => '192.168.1.1']);
 
-        // Flush should throw because all events failed
+        // Flush should throw because the batched request failed
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('All 1 events failed to send');
+        $this->expectExceptionMessage('Failed to send 1 event(s): Connection refused');
         $sdk->flush();
     }
 
@@ -719,7 +719,7 @@ class LiteSOCTest extends TestCase
 
         // Verify debug output was generated
         $this->assertStringContainsString('[LiteSOC]', $output);
-        $this->assertStringContainsString('Successfully sent event', $output);
+        $this->assertStringContainsString('Successfully sent 1 event(s)', $output);
     }
 
     public function testSilentModeHandlesErrorsGracefully(): void
@@ -748,7 +748,7 @@ class LiteSOCTest extends TestCase
 
         // Verify error was logged (not thrown)
         $this->assertStringContainsString('[LiteSOC]', $output);
-        $this->assertStringContainsString('Failed to send event', $output);
+        $this->assertStringContainsString('Failed to send 1 event(s)', $output);
     }
 
     // ============================================

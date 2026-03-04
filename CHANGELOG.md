@@ -5,6 +5,23 @@ All notable changes to the LiteSOC PHP SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-03-03
+
+### Added
+- **Batch ingestion support** for the Event Collection API:
+  - New `LiteSOC::trackBatch(array $events): int` helper to send up to 100 events in a single POST `/collect` request using the `{ \"events\": [...] }` body shape.
+
+### Changed
+- **Event sending semantics**:
+  - `sendEvents()` now sends a single event as a flat JSON body and multiple events as `{ \"events\": [ ... ] }`, matching the backend batch ingestion contract.
+  - Debug output prints `Successfully sent N event(s)` instead of per-event log lines.
+- **Error handling**:
+  - On failure, `sendEvents()` logs `Failed to send N event(s): ...` and re-queues events with retry counts as before, but at the batch level.
+
+### Notes
+- Fully backward compatible:
+  - Existing `track()` and `flush()` usage continues to work; batching is an optional optimization.
+
 ## [2.4.0] - 2026-03-02
 
 ### Added
